@@ -1,9 +1,875 @@
-<html><head><meta charset='UTF-8'><title>odin game dev loop simulator</title>
-<link rel='stylesheet' href='styles.css'></head>
-<body><div class='container'>
-<h1>odin game dev loop simulator</h1>
-<textarea id='input' placeholder='Paste code or describe scenario'></textarea>
-<input id='value' placeholder='Optional metric'>
-<button onclick='run()'>Analyze</button>
-<div id='res' class='result'></div>
-</div><script src='script.js'></script></body></html>
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odin Game Dev Loop Simulator – Fixed Timestep, Frame Budget & Loop Analysis</title>
+<meta name="description" content="Simulate and analyze Odin game loop patterns. Configure fixed timestep, variable timestep, and interpolated rendering. Visualize frame budget, detect spiral of death, and get Odin code output.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:        #06080c;
+    --surface:   #0b0f18;
+    --surface-2: #10151f;
+    --border:    #1a2230;
+    --accent:    #f97316;
+    --accent-2:  #fb923c;
+    --accent-dim: rgba(249,115,22,.07);
+    --green:     #22c55e;
+    --green-dim: rgba(34,197,94,.08);
+    --yellow:    #fbbf24;
+    --yellow-dim: rgba(251,191,36,.07);
+    --red:       #ef4444;
+    --red-dim:   rgba(239,68,68,.07);
+    --blue:      #38bdf8;
+    --blue-dim:  rgba(56,189,248,.07);
+    --text:      #cbd5e1;
+    --muted:     #475569;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,.07) 3px, rgba(0,0,0,.07) 4px);
+    pointer-events: none; z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .25;
+    pointer-events: none; z-index: 0;
+}
+
+.wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+    width: 100%;
+    flex: 1;
+}
+
+nav {
+    position: relative; z-index: 2;
+    padding: 18px 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+nav a {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--transition);
+}
+
+nav a:hover { color: var(--accent); }
+nav a::before { content: "<-"; }
+
+header {
+    padding: 36px 0 32px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .5s ease both;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.2rem, 3vw, 1.9rem);
+    font-weight: 400;
+    color: #fff;
+    letter-spacing: -.01em;
+    line-height: 1.2;
+    margin-bottom: 10px;
+}
+
+header h1 .acc { color: var(--accent); }
+header p { font-size: .9rem; color: var(--muted); font-style: italic; font-weight: 300; max-width: 520px; }
+
+/* TOOL CARD */
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin: 32px 0;
+    animation: fadeUp .5s .08s ease both;
+}
+
+/* LOOP MODE SELECTOR */
+.mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.mode-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color var(--transition), background var(--transition);
+    user-select: none;
+}
+
+.mode-card.selected {
+    border-color: rgba(249,115,22,.5);
+    background: var(--accent-dim);
+}
+
+.mode-card:hover:not(.selected) { border-color: var(--border); background: var(--surface-2); opacity: .85; }
+
+.mode-name {
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.mode-card.selected .mode-name { color: var(--accent); }
+
+.mode-desc {
+    font-size: .75rem;
+    color: var(--muted);
+    font-style: italic;
+    line-height: 1.4;
+}
+
+/* SLIDERS */
+.params-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.param-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.param-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.param-label {
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.param-value {
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    color: var(--accent);
+    font-weight: 500;
+}
+
+input[type="range"] {
+    width: 100%;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    transition: transform var(--transition);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+}
+
+.param-hint { font-size: .72rem; color: var(--muted); font-style: italic; }
+
+/* BUTTON */
+.btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.btn-run:hover {
+    background: var(--accent-2);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(249,115,22,.3);
+}
+
+.btn-run:active { transform: translateY(0); }
+
+/* RESULTS */
+#result { margin-top: 24px; display: none; animation: fadeUp .35s ease both; }
+#result.visible { display: block; }
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* METRICS GRID */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.metric-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.metric-card.mc-good   { border-left: 3px solid var(--green); }
+.metric-card.mc-warn   { border-left: 3px solid var(--yellow); }
+.metric-card.mc-danger { border-left: 3px solid var(--red); }
+.metric-card.mc-info   { border-left: 3px solid var(--blue); }
+
+.m-label { font-family: var(--font-mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.m-value { font-family: var(--font-mono); font-size: 1.35rem; color: #fff; line-height: 1.1; }
+.m-sub   { font-size: .68rem; color: var(--muted); font-style: italic; }
+
+/* FRAME BUDGET BAR */
+.budget-section { margin-bottom: 20px; }
+
+.budget-title {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+}
+
+.budget-bar-wrap {
+    position: relative;
+    height: 28px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.budget-segment {
+    position: absolute;
+    top: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    color: rgba(0,0,0,.8);
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+}
+
+.seg-update  { background: var(--green);  left: 0; }
+.seg-render  { background: var(--blue); }
+.seg-physics { background: var(--yellow); }
+.seg-free    { background: var(--surface-2); border-left: 1px dashed var(--border); color: var(--muted); font-size: .55rem; }
+
+.budget-legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    color: var(--muted);
+}
+
+.legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+/* WARNINGS */
+.warnings-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+
+.warning-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    font-size: .845rem;
+}
+
+.warning-item.w-high   { border-left: 3px solid var(--red); }
+.warning-item.w-medium { border-left: 3px solid var(--yellow); }
+.warning-item.w-info   { border-left: 3px solid var(--blue); }
+
+.w-icon { flex-shrink: 0; font-family: var(--font-mono); font-size: .75rem; margin-top: 2px; }
+.w-icon.high   { color: var(--red); }
+.w-icon.medium { color: var(--yellow); }
+.w-icon.info   { color: var(--blue); }
+
+.w-body { flex: 1; }
+.w-title { font-family: var(--font-mono); font-size: .8rem; color: var(--text); margin-bottom: 3px; }
+.w-desc  { font-size: .8rem; color: var(--muted); font-weight: 300; font-style: italic; line-height: 1.5; }
+
+/* CODE OUTPUT */
+.code-section { margin-top: 4px; }
+
+.code-title {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.btn-copy {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.btn-copy:hover { color: var(--green); border-color: rgba(34,197,94,.3); }
+
+.code-block {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    line-height: 1.65;
+    color: var(--text);
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.ck  { color: var(--accent-2); }   /* keyword */
+.ct  { color: var(--green); }      /* type */
+.cc  { color: #4b5563; font-style: italic; } /* comment */
+.cn  { color: var(--yellow); }     /* number */
+.cs  { color: var(--blue); }       /* string/ident */
+
+/* INFO */
+.info-section {
+    padding: 36px 0;
+    border-top: 1px solid var(--border);
+    animation: fadeUp .5s .15s ease both;
+}
+
+.info-section h2 { font-family: var(--font-mono); font-size: 1rem; font-weight: 400; color: #fff; margin-bottom: 14px; }
+.info-section p  { font-size: .875rem; color: var(--muted); font-weight: 300; font-style: italic; margin-bottom: 10px; max-width: 580px; }
+.info-section ul { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.info-section ul li { display: flex; gap: 10px; font-family: var(--font-mono); font-size: .76rem; color: var(--text); }
+.info-section ul li::before { content: "->"; color: var(--accent); flex-shrink: 0; }
+
+footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+footer p { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 560px) {
+    .tool-card { padding: 18px; }
+    .mode-grid { grid-template-columns: 1fr; }
+    .params-grid { grid-template-columns: 1fr; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+</head>
+<body>
+
+<nav class="wrapper">
+    <a href="/odin-tools/">Odin Tools</a>
+</nav>
+
+<div class="wrapper">
+
+<header>
+    <div class="header-chip">Loop Simulator</div>
+    <h1><span class="acc">Game Dev</span> Loop Simulator</h1>
+    <p>Configure your game loop parameters and simulate frame budget, timestep behavior, spiral-of-death risk, and get ready-to-use Odin code for your chosen loop pattern.</p>
+</header>
+
+<div class="tool-card">
+
+<!-- LOOP MODE -->
+<div style="font-family:var(--font-mono);font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Loop Pattern</div>
+<div class="mode-grid">
+    <div class="mode-card selected" data-mode="fixed" onclick="selectMode(this)">
+        <div class="mode-name">Fixed Timestep</div>
+        <div class="mode-desc">Deterministic. Physics runs at fixed rate. Render interpolates.</div>
+    </div>
+    <div class="mode-card" data-mode="variable" onclick="selectMode(this)">
+        <div class="mode-name">Variable Timestep</div>
+        <div class="mode-desc">Simple. Delta time passed to update. Non-deterministic physics.</div>
+    </div>
+    <div class="mode-card" data-mode="semi" onclick="selectMode(this)">
+        <div class="mode-name">Semi-Fixed</div>
+        <div class="mode-desc">Max delta cap. Prevents spiral of death. Good balance.</div>
+    </div>
+</div>
+
+<!-- PARAMS -->
+<div class="params-grid">
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Target FPS</span>
+            <span class="param-value" id="val_fps">60</span>
+        </div>
+        <input type="range" id="sl_fps" min="15" max="240" value="60" step="1" oninput="updateVal('sl_fps','val_fps','fps')">
+        <span class="param-hint">Render target frame rate</span>
+    </div>
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Physics / Update Hz</span>
+            <span class="param-value" id="val_hz">60</span>
+        </div>
+        <input type="range" id="sl_hz" min="15" max="240" value="60" step="1" oninput="updateVal('sl_hz','val_hz','hz')">
+        <span class="param-hint">Fixed update tick rate</span>
+    </div>
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Update cost (ms)</span>
+            <span class="param-value" id="val_update">2</span>
+        </div>
+        <input type="range" id="sl_update" min="0" max="30" value="2" step="0.5" oninput="updateVal('sl_update','val_update','ms')">
+        <span class="param-hint">Time per update() call</span>
+    </div>
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Render cost (ms)</span>
+            <span class="param-value" id="val_render">4</span>
+        </div>
+        <input type="range" id="sl_render" min="0" max="30" value="4" step="0.5" oninput="updateVal('sl_render','val_render','ms')">
+        <span class="param-hint">Time per render() call</span>
+    </div>
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Max delta cap (ms)</span>
+            <span class="param-value" id="val_cap">250</span>
+        </div>
+        <input type="range" id="sl_cap" min="16" max="500" value="250" step="16" oninput="updateVal('sl_cap','val_cap','ms')">
+        <span class="param-hint">Spiral-of-death prevention</span>
+    </div>
+
+    <div class="param-group">
+        <div class="param-header">
+            <span class="param-label">Frame spike (ms)</span>
+            <span class="param-value" id="val_spike">0</span>
+        </div>
+        <input type="range" id="sl_spike" min="0" max="200" value="0" step="10" oninput="updateVal('sl_spike','val_spike','ms')">
+        <span class="param-hint">Simulate a frame hitch</span>
+    </div>
+
+</div>
+
+<button class="btn-run" onclick="simulate()">Simulate Loop</button>
+
+<div id="result"></div>
+
+</div>
+
+<div class="info-section">
+    <h2>Game Loop Patterns Explained</h2>
+    <p>Each pattern has tradeoffs between determinism, simplicity, and stability under load.</p>
+    <ul>
+        <li>Fixed Timestep -- physics runs at a guaranteed rate, render interpolates between states. Best for networked games and deterministic simulation.</li>
+        <li>Variable Timestep -- simpler code, but physics is framerate-dependent. Floating point errors accumulate differently at different rates.</li>
+        <li>Semi-Fixed -- caps delta time to prevent the spiral of death. Good default for single-player games. Physics may slow down but never diverge.</li>
+        <li>Spiral of Death -- when update() takes longer than one frame budget, the next frame has more work, causing cascading slowdowns.</li>
+        <li>Interpolation alpha -- the fractional position between two physics ticks: alpha = accumulator / fixed_step.</li>
+    </ul>
+</div>
+
+</div>
+
+<footer class="wrapper">
+    <p>Odin Tools -- Game Dev Loop Simulator</p>
+</footer>
+
+<script>
+var selectedMode = "fixed";
+
+function selectMode(el) {
+    document.querySelectorAll(".mode-card").forEach(function(c) { c.classList.remove("selected"); });
+    el.classList.add("selected");
+    selectedMode = el.dataset.mode;
+}
+
+function updateVal(sliderId, labelId, unit) {
+    var v = document.getElementById(sliderId).value;
+    var display = parseFloat(v) % 1 === 0 ? v : parseFloat(v).toFixed(1);
+    document.getElementById(labelId).textContent = display;
+}
+
+function fmt(n, dec) {
+    dec = dec || 2;
+    return parseFloat(n.toFixed(dec));
+}
+
+function simulate() {
+    var fps    = parseInt(document.getElementById("sl_fps").value, 10);
+    var hz     = parseInt(document.getElementById("sl_hz").value, 10);
+    var update = parseFloat(document.getElementById("sl_update").value);
+    var render = parseFloat(document.getElementById("sl_render").value);
+    var cap    = parseFloat(document.getElementById("sl_cap").value);
+    var spike  = parseFloat(document.getElementById("sl_spike").value);
+    var mode   = selectedMode;
+
+    // Frame budget
+    var frameBudget   = 1000 / fps;
+    var fixedStep     = 1000 / hz;
+    var updatesPerFrame = mode === "fixed" ? Math.ceil(frameBudget / fixedStep) : 1;
+    var totalUpdateCost = update * updatesPerFrame;
+    var totalFrameCost  = totalUpdateCost + render;
+    var freeBudget      = frameBudget - totalFrameCost;
+    var utilization     = (totalFrameCost / frameBudget) * 100;
+
+    // Spike simulation
+    var spikeCost     = spike > 0 ? (totalFrameCost + spike) : totalFrameCost;
+    var spikeBudget   = frameBudget;
+    var spikeOverflow = Math.max(0, spikeCost - spikeBudget);
+
+    // Spiral of death risk
+    var spiralRisk = "none";
+    if (mode === "fixed") {
+        if (totalFrameCost > frameBudget) { spiralRisk = "high"; }
+        else if (totalFrameCost > frameBudget * 0.8) { spiralRisk = "medium"; }
+        else { spiralRisk = "low"; }
+    } else if (mode === "variable") {
+        spiralRisk = totalFrameCost > frameBudget ? "high" : "low";
+    } else {
+        spiralRisk = spikeOverflow > cap ? "medium" : "low";
+    }
+
+    // Actual achievable FPS
+    var actualFPS = Math.min(fps, Math.floor(1000 / Math.max(totalFrameCost, 0.1)));
+    var spikeActualFPS = spike > 0 ? Math.floor(1000 / Math.max(spikeCost, 0.1)) : actualFPS;
+
+    // Metrics
+    var budgetCls = freeBudget > 4 ? "mc-good" : freeBudget > 0 ? "mc-warn" : "mc-danger";
+    var fpsCls    = actualFPS >= fps ? "mc-good" : actualFPS >= fps * 0.8 ? "mc-warn" : "mc-danger";
+    var spiralCls = spiralRisk === "low" ? "mc-good" : spiralRisk === "medium" ? "mc-warn" : "mc-danger";
+
+    var metricsHTML =
+        "<div class=\"metrics-grid\">" +
+            "<div class=\"metric-card mc-info\"><span class=\"m-label\">Frame budget</span><span class=\"m-value\">" + fmt(frameBudget) + "</span><span class=\"m-sub\">ms at " + fps + " fps</span></div>" +
+            "<div class=\"metric-card mc-info\"><span class=\"m-label\">Fixed step</span><span class=\"m-value\">" + fmt(fixedStep) + "</span><span class=\"m-sub\">ms at " + hz + " hz</span></div>" +
+            "<div class=\"metric-card " + budgetCls + "\"><span class=\"m-label\">Free budget</span><span class=\"m-value\">" + fmt(freeBudget) + "</span><span class=\"m-sub\">ms per frame</span></div>" +
+            "<div class=\"metric-card " + fpsCls + "\"><span class=\"m-label\">Achievable FPS</span><span class=\"m-value\">" + actualFPS + "</span><span class=\"m-sub\">" + (actualFPS >= fps ? "on target" : "below target") + "</span></div>" +
+            "<div class=\"metric-card mc-info\"><span class=\"m-label\">Updates/frame</span><span class=\"m-value\">" + updatesPerFrame + "</span><span class=\"m-sub\">ticks per render</span></div>" +
+            "<div class=\"metric-card " + spiralCls + "\"><span class=\"m-label\">Spiral risk</span><span class=\"m-value\">" + spiralRisk + "</span><span class=\"m-sub\">" + (spiralRisk === "low" ? "stable" : "check config") + "</span></div>" +
+        "</div>";
+
+    // Frame budget visualization
+    var updatePct  = Math.min((totalUpdateCost / frameBudget) * 100, 100);
+    var renderPct  = Math.min((render / frameBudget) * 100, Math.max(0, 100 - updatePct));
+    var freePct    = Math.max(0, 100 - updatePct - renderPct);
+    var renderLeft = updatePct;
+
+    var budgetHTML =
+        "<div class=\"budget-section\">" +
+            "<div class=\"budget-title\">Frame Budget Breakdown (" + fmt(frameBudget) + " ms)</div>" +
+            "<div class=\"budget-bar-wrap\">" +
+                "<div class=\"budget-segment seg-update\" style=\"width:" + updatePct + "%\">" + (updatePct > 8 ? fmt(totalUpdateCost) + "ms" : "") + "</div>" +
+                "<div class=\"budget-segment seg-render\" style=\"left:" + renderLeft + "%;width:" + renderPct + "%\">" + (renderPct > 8 ? fmt(render) + "ms" : "") + "</div>" +
+                "<div class=\"budget-segment seg-free\" style=\"left:" + (updatePct + renderPct) + "%;width:" + freePct + "%\">" + (freePct > 6 ? fmt(freeBudget, 1) + "ms free" : "") + "</div>" +
+            "</div>" +
+            "<div class=\"budget-legend\">" +
+                "<div class=\"legend-item\"><div class=\"legend-dot\" style=\"background:var(--green)\"></div> Update (" + fmt(totalUpdateCost) + "ms)</div>" +
+                "<div class=\"legend-item\"><div class=\"legend-dot\" style=\"background:var(--blue)\"></div> Render (" + fmt(render) + "ms)</div>" +
+                "<div class=\"legend-item\"><div class=\"legend-dot\" style=\"background:var(--surface-2);border:1px solid var(--border)\"></div> Free (" + fmt(freeBudget) + "ms)</div>" +
+                (spike > 0 ? "<div class=\"legend-item\"><div class=\"legend-dot\" style=\"background:var(--red)\"></div> Spike: FPS drops to " + spikeActualFPS + "</div>" : "") +
+            "</div>" +
+        "</div>";
+
+    // Warnings
+    var warnings = [];
+
+    if (freeBudget < 0) {
+        warnings.push({ cls: "w-high", icon: "high", title: "Frame budget exceeded by " + fmt(-freeBudget) + "ms", desc: "Your update + render cost exceeds one frame budget. The game will run slower than " + fps + " FPS. Reduce update cost, render cost, or lower target FPS." });
+    }
+
+    if (mode === "fixed" && updatesPerFrame > 3) {
+        warnings.push({ cls: "w-high", icon: "high", title: "Too many updates per frame (" + updatesPerFrame + ")", desc: "With " + hz + " Hz physics and " + fps + " FPS render, each frame runs " + updatesPerFrame + " update ticks. At " + update + "ms per tick, that is " + fmt(totalUpdateCost) + "ms just for physics." });
+    }
+
+    if (spiralRisk === "high" && mode === "fixed") {
+        warnings.push({ cls: "w-high", icon: "high", title: "Spiral of Death Risk", desc: "When a frame takes longer than the budget, the accumulator grows. More update ticks fire next frame, making it even slower. Spiral of death leads to infinite slowdown. Add a delta cap." });
+    }
+
+    if (mode === "variable") {
+        warnings.push({ cls: "w-medium", icon: "medium", title: "Variable Timestep: Physics Not Deterministic", desc: "With variable dt, physics results differ at 30 FPS vs 144 FPS. High delta times can cause tunneling in collision detection. Not suitable for networked games." });
+    }
+
+    if (spike > 0 && spikeOverflow > 0) {
+        warnings.push({ cls: "w-high", icon: "high", title: "Frame spike causes " + fmt(spikeOverflow) + "ms overflow", desc: "A " + spike + "ms spike (e.g. asset load, GC) overflows the " + fmt(frameBudget) + "ms budget. " + (mode === "semi" ? "Semi-fixed cap of " + cap + "ms will prevent spiral." : "Consider a delta cap to prevent cascade slowdown.") });
+    }
+
+    if (fps !== hz && mode === "fixed") {
+        warnings.push({ cls: "w-medium", icon: "medium", title: "FPS and update rate mismatch (" + fps + " vs " + hz + " Hz)", desc: "Render and physics run at different rates. This is intentional -- use the interpolation alpha for smooth rendering. alpha = accumulator / fixed_step." });
+    }
+
+    if (utilization < 50 && freeBudget > 0) {
+        warnings.push({ cls: "w-info", icon: "info", title: "Frame budget only " + fmt(utilization) + "% utilized", desc: "You have " + fmt(freeBudget) + "ms of free budget per frame. You can increase simulation quality, add more systems, or lower hardware requirements." });
+    }
+
+    var warningsHTML = "";
+    if (warnings.length > 0) {
+        warningsHTML = "<div class=\"warnings-list\">" +
+            warnings.map(function(w) {
+                return "<div class=\"warning-item " + w.cls + "\">" +
+                    "<span class=\"w-icon " + w.icon + "\">[" + w.icon.substring(0,1).toUpperCase() + "]</span>" +
+                    "<div class=\"w-body\"><div class=\"w-title\">" + w.title + "</div><div class=\"w-desc\">" + w.desc + "</div></div>" +
+                "</div>";
+            }).join("") +
+        "</div>";
+    }
+
+    // Code generation
+    var code = generateCode(mode, fps, hz, cap, fixedStep);
+
+    var codeHTML =
+        "<div class=\"code-section\">" +
+            "<div class=\"code-title\">Generated Odin Code <button class=\"btn-copy\" onclick=\"copyCode()\">Copy</button></div>" +
+            "<div class=\"code-block\" id=\"codeBlock\">" + code + "</div>" +
+        "</div>";
+
+    var resultEl = document.getElementById("result");
+    resultEl.innerHTML =
+        "<div class=\"divider\"></div>" +
+        metricsHTML +
+        "<div class=\"divider\"></div>" +
+        budgetHTML +
+        "<div class=\"divider\"></div>" +
+        (warningsHTML || "") +
+        (warningsHTML ? "<div class=\"divider\"></div>" : "") +
+        codeHTML;
+
+    resultEl.classList.add("visible");
+    resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function generateCode(mode, fps, hz, cap, fixedStep) {
+    if (mode === "fixed") {
+        return [
+            "package main",
+            "",
+            "import \"core:time\"",
+            "",
+            "FIXED_STEP    :: " + (1.0 / hz).toFixed(6) + "  // " + hz + " Hz physics",
+            "MAX_DELTA     :: 0.25        // spiral-of-death cap (250ms)",
+            "TARGET_FPS    :: " + fps,
+            "",
+            "game_loop :: proc() {",
+            "    accumulator: f64",
+            "    prev_time := time.now()",
+            "",
+            "    for !should_quit() {",
+            "        now       := time.now()",
+            "        delta     := time.duration_seconds(time.diff(prev_time, now))",
+            "        prev_time  = now",
+            "",
+            "        // Cap to prevent spiral of death",
+            "        if delta > MAX_DELTA { delta = MAX_DELTA }",
+            "",
+            "        accumulator += delta",
+            "",
+            "        // Fixed timestep update",
+            "        for accumulator >= FIXED_STEP {",
+            "            update(FIXED_STEP)",
+            "            accumulator -= FIXED_STEP",
+            "        }",
+            "",
+            "        // Interpolation alpha for smooth rendering",
+            "        alpha := accumulator / FIXED_STEP",
+            "        render(alpha)",
+            "    }",
+            "}",
+        ].join("\n");
+    }
+
+    if (mode === "variable") {
+        return [
+            "package main",
+            "",
+            "import \"core:time\"",
+            "",
+            "game_loop :: proc() {",
+            "    prev_time := time.now()",
+            "",
+            "    for !should_quit() {",
+            "        now       := time.now()",
+            "        delta     := time.duration_seconds(time.diff(prev_time, now))",
+            "        prev_time  = now",
+            "",
+            "        // Variable timestep -- physics depends on frame rate",
+            "        // NOTE: not deterministic, avoid for networked games",
+            "        update(delta)",
+            "        render(1.0)  // no interpolation needed",
+            "    }",
+            "}",
+        ].join("\n");
+    }
+
+    // semi-fixed
+    return [
+        "package main",
+        "",
+        "import \"core:time\"",
+        "",
+        "FIXED_STEP :: " + (1.0 / hz).toFixed(6) + "  // " + hz + " Hz physics",
+        "MAX_DELTA  :: " + (cap / 1000).toFixed(3) + "        // " + cap + "ms cap",
+        "",
+        "game_loop :: proc() {",
+        "    accumulator: f64",
+        "    prev_time := time.now()",
+        "",
+        "    for !should_quit() {",
+        "        now       := time.now()",
+        "        delta     := time.duration_seconds(time.diff(prev_time, now))",
+        "        prev_time  = now",
+        "",
+        "        // Semi-fixed: cap delta, allow variable step size",
+        "        if delta > MAX_DELTA { delta = MAX_DELTA }",
+        "",
+        "        accumulator += delta",
+        "",
+        "        for accumulator >= FIXED_STEP {",
+        "            update(FIXED_STEP)",
+        "            accumulator -= FIXED_STEP",
+        "        }",
+        "",
+        "        // Render with remaining fraction",
+        "        alpha := accumulator / FIXED_STEP",
+        "        render(alpha)",
+        "    }",
+        "}",
+    ].join("\n");
+}
+
+function copyCode() {
+    var el  = document.getElementById("codeBlock");
+    var txt = el ? (el.innerText || el.textContent) : "";
+    if (!txt) { return; }
+    navigator.clipboard.writeText(txt)
+        .then(function() {
+            var btn = document.querySelector(".btn-copy");
+            if (btn) { btn.textContent = "Copied!"; setTimeout(function() { btn.textContent = "Copy"; }, 1800); }
+        })
+        .catch(function() {});
+}
+</script>
+
+</body>
+</html>
