@@ -1,122 +1,631 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="google-site-verification" content="PkLa_ViOo6FAHpvh8SacceMb95o9tePRdrqLNBz9X1M" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-site-verification" content="PkLa_ViOo6FAHpvh8SacceMb95o9tePRdrqLNBz9X1M" />
+<meta name="robots" content="index, follow">
 
-  <!-- SEO -->
-  <title>Odin Tools – Data-Oriented Design, Memory Layout & Performance Analysis</title>
-  <meta name="description" content="Explore Odin language internals with tools for data-oriented design, memory layout visualization, struct packing, and performance profiling.">
-  <meta name="keywords" content="
-    odin data oriented design analyzer,
-    odin memory layout visualizer tool,
-    odin struct packing checker alignment,
-    odin performance profiler tool,
-    odin game dev loop simulator,
-    odin language debugging tools,
-    odin memory model explained,
-    odin performance optimization tool,
-    odin struct alignment visualizer,
-    odin game development tools
-  ">
-  <meta name="robots" content="index, follow">
+<title>Odin Language Tools – Data-Oriented Design Analyzer, Memory Layout Visualizer & Struct Packing Checker</title>
+<meta name="description" content="Free tools for Odin programming language developers: analyze data-oriented design patterns, visualize memory layout, check struct packing and alignment, profile performance, and simulate game dev loops. Built for systems programmers and game developers.">
+<meta name="keywords" content="odin language tools, odin data oriented design analyzer, odin memory layout visualizer, odin struct packing checker, odin performance profiler, odin game dev loop simulator, odin struct alignment, odin memory model, odin game development tools, data oriented design odin, odin programming language debugger, odin struct padding tool">
 
-  <!-- Open Graph -->
-  <meta property="og:title" content="Odin Tools – Memory, Performance & Data-Oriented Design">
-  <meta property="og:description" content="Analyze Odin memory layout, struct packing, and performance in game development.">
-  <meta property="og:type" content="website">
+<meta property="og:title" content="Odin Language Tools - Memory Layout, Struct Packing and Performance Profiling">
+<meta property="og:description" content="5 free tools for Odin language developers: data-oriented design analysis, memory layout visualization, struct packing, and game loop simulation.">
+<meta property="og:type" content="website">
 
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #020617;
-      color: #e2e8f0;
-      margin: 0;
-      padding: 20px;
-    }
-    h1, h2 {
-      color: #f97316;
-    }
-    a {
-      color: #22c55e;
-      text-decoration: none;
-    }
-    a:hover {
-      text-decoration: underline;
-    }
-    .container {
-      max-width: 1000px;
-      margin: auto;
-    }
-    .tool {
-      margin-bottom: 18px;
-      padding: 16px;
-      background: #0f172a;
-      border-radius: 10px;
-    }
-  </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:        #06080c;
+    --surface:   #0b0f18;
+    --surface-2: #10151f;
+    --border:    #1a2230;
+    --border-hi: #f9731640;
+    --accent:    #f97316;
+    --accent-2:  #fb923c;
+    --accent-dim: rgba(249,115,22,.07);
+    --green:     #22c55e;
+    --text:      #cbd5e1;
+    --muted:     #475569;
+    --danger:    #ef4444;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* scan-line texture */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,.08) 3px,
+        rgba(0,0,0,.08) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* grid overlay */
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .3;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 28px;
+}
+
+/* HEADER */
+header {
+    padding: 72px 0 60px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .6s ease both;
+}
+
+.header-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.25);
+    border-radius: 3px;
+    padding: 3px 10px;
+}
+
+.header-ver {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    color: var(--muted);
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.8rem, 4.5vw, 3.2rem);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -.01em;
+    color: #fff;
+    margin-bottom: 20px;
+}
+
+header h1 .acc { color: var(--accent); }
+
+.header-body {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 40px;
+    align-items: end;
+}
+
+header p {
+    font-size: 1rem;
+    color: var(--muted);
+    font-weight: 300;
+    max-width: 520px;
+    font-style: italic;
+}
+
+.spec-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+}
+
+.spec-row {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    letter-spacing: .06em;
+    color: var(--muted);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.spec-row .val { color: var(--green); }
+
+/* SECTIONS */
+section {
+    padding: 48px 0;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .55s ease both;
+}
+
+section:nth-of-type(1) { animation-delay: .06s; }
+section:nth-of-type(2) { animation-delay: .12s; }
+section:nth-of-type(3) { animation-delay: .18s; }
+section:nth-of-type(4) { animation-delay: .24s; }
+section:nth-of-type(5) { animation-delay: .30s; }
+section:last-of-type   { border-bottom: none; }
+
+.section-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.section-label h2 {
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    font-weight: 400;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    white-space: nowrap;
+}
+
+.section-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.section-idx {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    color: var(--muted);
+}
+
+/* TOOLS GRID */
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.tool {
+    background: var(--surface);
+    padding: 24px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-decoration: none;
+    color: inherit;
+    position: relative;
+    overflow: hidden;
+    transition: background var(--transition);
+}
+
+.tool::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 2px;
+    height: 100%;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+
+.tool:hover { background: var(--surface-2); }
+.tool:hover::before { opacity: 1; }
+
+.tool-id {
+    font-family: var(--font-mono);
+    font-size: .6rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    opacity: .7;
+}
+
+.tool-name {
+    font-family: var(--font-mono);
+    font-size: .95rem;
+    font-weight: 400;
+    color: #fff;
+    line-height: 1.3;
+}
+
+.tool-desc {
+    font-size: .855rem;
+    color: var(--muted);
+    font-weight: 300;
+    font-style: italic;
+    flex: 1;
+    line-height: 1.55;
+}
+
+.tool-link {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--green);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+    transition: gap var(--transition);
+}
+
+.tool-link::after { content: ">"; }
+.tool:hover .tool-link { gap: 9px; }
+
+/* USE CASES */
+.use-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+
+.use-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 13px 15px;
+    font-size: .865rem;
+    color: var(--text);
+    transition: border-color var(--transition);
+}
+
+.use-item:hover { border-color: rgba(249,115,22,.25); }
+
+.use-arrow {
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+
+/* FAQ */
+.faq-list { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+
+.faq-item {
+    background: var(--surface);
+    padding: 18px 22px;
+    transition: background var(--transition);
+}
+
+.faq-item:hover { background: var(--surface-2); }
+
+.faq-q {
+    font-family: var(--font-mono);
+    font-size: .88rem;
+    color: #fff;
+    margin-bottom: 8px;
+    font-weight: 400;
+}
+
+.faq-a {
+    font-size: .855rem;
+    color: var(--muted);
+    font-weight: 300;
+    font-style: italic;
+    line-height: 1.65;
+}
+
+.faq-a code {
+    font-family: var(--font-mono);
+    font-size: .78em;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-style: normal;
+}
+
+/* LONG-TAIL */
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.tag {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 12px;
+    cursor: default;
+    transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.tag:hover {
+    color: var(--accent);
+    border-color: rgba(249,115,22,.3);
+    background: var(--accent-dim);
+}
+
+/* FOOTER */
+footer {
+    padding: 40px 0;
+    border-top: 1px solid var(--border);
+    position: relative;
+    z-index: 1;
+}
+
+.footer-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.footer-brand {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+footer p {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .03em;
+}
+
+/* ANIMATIONS */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 620px) {
+    header { padding: 48px 0 40px; }
+    .header-body { grid-template-columns: 1fr; }
+    .spec-block { align-items: flex-start; }
+    .tools-grid { grid-template-columns: 1fr; }
+    .use-grid   { grid-template-columns: 1fr; }
+    header h1 { font-size: 1.7rem; }
+}
+</style>
+
 </head>
 
 <body>
-  <div class="container">
+<div class="wrapper">
 
-    <h1>Odin Tools</h1>
-
-    <p>
-      Explore the <strong>Odin programming language</strong> with tools focused on
-      <em>data-oriented design, memory layout, struct packing, and performance profiling</em>.
-      Ideal for systems programmers and game developers.
-    </p>
-
-    <h2>Data-Oriented Design</h2>
-
-    <div class="tool">
-      <a href="odin-data-oriented-design-analyzer/">
-        <strong>Data-Oriented Design Analyzer</strong>
-      </a>
-      <p>Understand data flow and cache-friendly structures.</p>
+```
+<!-- HEADER -->
+<header>
+    <div class="header-top">
+        <span class="header-chip">Odin Toolkit</span>
+        <span class="header-ver">v1 / 5 tools</span>
     </div>
 
-    <div class="tool">
-      <a href="odin-game-dev-loop-simulator/">
-        <strong>Game Loop Simulator</strong>
-      </a>
-      <p>Analyze update/render loops for performance.</p>
+    <h1>
+        <span class="acc">Odin</span> Language Tools<br>
+        Memory. Layout. Performance.
+    </h1>
+
+    <div class="header-body">
+        <p>
+            Five free tools for systems programmers and game developers working with
+            the Odin programming language. Analyze data-oriented design patterns,
+            visualize struct memory layout, check packing efficiency, and profile performance
+            — directly in the browser.
+        </p>
+        <div class="spec-block">
+            <div class="spec-row">Tools <span class="val">05</span></div>
+            <div class="spec-row">Language <span class="val">Odin</span></div>
+            <div class="spec-row">Focus <span class="val">DOD / Game Dev</span></div>
+            <div class="spec-row">Install <span class="val">None required</span></div>
+        </div>
     </div>
+</header>
 
-    <h2>Memory & Layout</h2>
-
-    <div class="tool">
-      <a href="odin-memory-layout-visualizer/">
-        <strong>Memory Layout Visualizer</strong>
-      </a>
-      <p>Visualize memory structure and alignment.</p>
+<!-- DATA-ORIENTED DESIGN -->
+<section>
+    <div class="section-label">
+        <h2>Data-Oriented Design</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">01</span>
     </div>
+    <div class="tools-grid">
 
-    <div class="tool">
-      <a href="odin-struct-packing-checker/">
-        <strong>Struct Packing Checker</strong>
-      </a>
-      <p>Analyze struct alignment and memory efficiency.</p>
+        <a class="tool" href="odin-data-oriented-design-analyzer/">
+            <span class="tool-id">odin-tools / dod-analyzer</span>
+            <span class="tool-name">Data-Oriented Design Analyzer</span>
+            <span class="tool-desc">Analyze struct layouts for cache-friendliness. Detect AoS vs SoA patterns, identify false sharing, and get DOD refactoring suggestions for Odin data structures.</span>
+            <span class="tool-link">Open DOD Analyzer</span>
+        </a>
+
+        <a class="tool" href="odin-game-dev-loop-simulator/">
+            <span class="tool-id">odin-tools / game-loop</span>
+            <span class="tool-name">Game Dev Loop Simulator</span>
+            <span class="tool-desc">Simulate and analyze Odin game loop patterns — fixed timestep, variable timestep, and interpolated rendering. Identify frame budget issues and update/render bottlenecks.</span>
+            <span class="tool-link">Open Loop Simulator</span>
+        </a>
+
     </div>
+</section>
 
-    <h2>Performance</h2>
-
-    <div class="tool">
-      <a href="odin-performance-profiler/">
-        <strong>Performance Profiler</strong>
-      </a>
-      <p>Measure execution speed and optimize bottlenecks.</p>
+<!-- MEMORY & LAYOUT -->
+<section>
+    <div class="section-label">
+        <h2>Memory &amp; Layout</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">02</span>
     </div>
+    <div class="tools-grid">
 
-    <hr>
+        <a class="tool" href="odin-memory-layout-visualizer/">
+            <span class="tool-id">odin-tools / memory-layout</span>
+            <span class="tool-name">Memory Layout Visualizer</span>
+            <span class="tool-desc">Visualize how Odin structs are laid out in memory. See field offsets, sizes, alignment padding, and total struct size with a byte-level diagram.</span>
+            <span class="tool-link">Open Layout Visualizer</span>
+        </a>
 
-    <p>
-      Built for <strong>game developers, systems programmers, and performance engineers</strong>
-      working with Odin and data-oriented architectures.
-    </p>
+        <a class="tool" href="odin-struct-packing-checker/">
+            <span class="tool-id">odin-tools / struct-packing</span>
+            <span class="tool-name">Struct Packing Checker</span>
+            <span class="tool-desc">Check Odin struct field ordering for optimal packing. Detect wasted padding bytes, suggest field reordering, and compare packed vs default alignment layouts.</span>
+            <span class="tool-link">Open Packing Checker</span>
+        </a>
 
-  </div>
+    </div>
+</section>
+
+<!-- PERFORMANCE -->
+<section>
+    <div class="section-label">
+        <h2>Performance Profiling</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">03</span>
+    </div>
+    <div class="tools-grid">
+
+        <a class="tool" href="odin-performance-profiler/">
+            <span class="tool-id">odin-tools / profiler</span>
+            <span class="tool-name">Performance Profiler</span>
+            <span class="tool-desc">Estimate execution cost, identify bottlenecks, and analyze algorithmic complexity in Odin code patterns. Designed for game loop and systems programming use cases.</span>
+            <span class="tool-link">Open Profiler</span>
+        </a>
+
+    </div>
+</section>
+
+<!-- USE CASES -->
+<section>
+    <div class="section-label">
+        <h2>Use Cases</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">04</span>
+    </div>
+    <div class="use-grid">
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Optimizing Odin structs for L1 cache line efficiency</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Converting Array-of-Structs to Struct-of-Arrays in game engines</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Detecting wasted padding bytes in tightly-packed Odin data structures</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Analyzing fixed vs variable timestep game loops for frame consistency</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Visualizing memory layout before and after struct field reordering</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Profiling hot paths in systems programming and real-time rendering</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Learning Odin memory model and alignment rules without running code</div>
+        <div class="use-item"><span class="use-arrow">-&gt;</span>Comparing Odin struct packing against C struct layouts</div>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section>
+    <div class="section-label">
+        <h2>Frequently Asked Questions</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">05</span>
+    </div>
+    <div class="faq-list">
+
+        <div class="faq-item">
+            <p class="faq-q">What is data-oriented design and why does it matter in Odin?</p>
+            <p class="faq-a">Data-oriented design (DOD) is a programming paradigm that organizes data in memory to maximize CPU cache efficiency rather than modeling around objects or abstractions. In Odin, DOD is a natural fit because the language gives you direct control over memory layout, struct alignment, and allocators. The core idea is to prefer Struct-of-Arrays (SoA) over Array-of-Structs (AoS) when iterating over large datasets — keeping only the fields you touch in cache at once. This can yield 2x to 10x performance improvements in game engines and real-time systems.</p>
+        </div>
+
+        <div class="faq-item">
+            <p class="faq-q">How does Odin handle struct alignment and padding?</p>
+            <p class="faq-a">Odin follows standard platform alignment rules: each field is aligned to its own size (1, 2, 4, or 8 bytes), and the struct itself is padded to the largest field alignment. For example, a struct with a <code>u8</code> followed by a <code>u64</code> will have 7 bytes of padding between them on a 64-bit system. You can use <code>#packed</code> to remove padding at the cost of potential misaligned reads, or reorder fields from largest to smallest to minimize waste. The Struct Packing Checker visualizes this automatically.</p>
+        </div>
+
+        <div class="faq-item">
+            <p class="faq-q">What is a fixed timestep game loop and how do I implement it in Odin?</p>
+            <p class="faq-a">A fixed timestep loop decouples your physics/update rate from your render rate. The pattern accumulates elapsed time and runs update steps at a fixed interval (e.g. 60Hz), then renders with interpolation for the remaining fraction. In Odin this looks like a simple loop: accumulate delta time, run <code>update()</code> while <code>accumulator >= fixed_step</code>, then call <code>render(interpolation_alpha)</code>. This prevents physics from diverging at different frame rates. The Game Loop Simulator lets you visualize and tune this behavior without writing code.</p>
+        </div>
+
+        <div class="faq-item">
+            <p class="faq-q">How does Odin compare to C for systems and game programming?</p>
+            <p class="faq-a">Odin offers similar low-level control to C — manual memory management, direct struct layout, no hidden allocations — but with a cleaner type system, built-in context-based allocators, and better ergonomics for modern systems programming. Odin has no hidden function calls, no constructors/destructors, and no implicit copies, which makes performance reasoning much more predictable. It also has first-class support for SoA transformation and multiple return values, making data-oriented patterns more natural to express than in C.</p>
+        </div>
+
+        <div class="faq-item">
+            <p class="faq-q">What is the difference between AoS and SoA in Odin?</p>
+            <p class="faq-a">AoS (Array of Structs) stores all fields of each entity together: <code>[dynamic]Entity</code> where <code>Entity</code> has position, velocity, health. SoA (Struct of Arrays) separates each field into its own array: separate <code>[dynamic]Vec3</code> for positions, velocities, etc. When you only need to update positions, SoA lets the CPU load only position data into cache — not the interleaved health and velocity data. Odin has native <code>#soa</code> support to transform AoS to SoA automatically. The DOD Analyzer helps identify which of your structures would benefit most from this transformation.</p>
+        </div>
+
+    </div>
+</section>
+
+<!-- LONG-TAIL QUERIES -->
+<section>
+    <div class="section-label">
+        <h2>Common Search Queries</h2>
+        <span class="section-line"></span>
+        <span class="section-idx">06</span>
+    </div>
+    <div class="tag-cloud">
+        <span class="tag">odin language struct alignment tool</span>
+        <span class="tag">data oriented design analyzer odin</span>
+        <span class="tag">odin memory layout visualizer</span>
+        <span class="tag">odin struct packing padding checker</span>
+        <span class="tag">odin game loop fixed timestep</span>
+        <span class="tag">odin performance profiler online</span>
+        <span class="tag">aos vs soa odin programming</span>
+        <span class="tag">odin language memory model explained</span>
+        <span class="tag">odin #packed struct vs default</span>
+        <span class="tag">cache friendly structs odin</span>
+        <span class="tag">odin game development tools</span>
+        <span class="tag">odin vs c for game programming</span>
+        <span class="tag">odin #soa transformation tool</span>
+        <span class="tag">systems programming odin tutorial</span>
+        <span class="tag">odin struct field reorder optimization</span>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-inner">
+        <span class="footer-brand">Odin Tools</span>
+        <p>5 free tools for systems programmers and game developers.</p>
+    </div>
+</footer>
+```
+
+</div>
 </body>
 </html>
