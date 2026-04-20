@@ -1,9 +1,966 @@
-<html><head><meta charset='UTF-8'><title>odin performance profiler</title>
-<link rel='stylesheet' href='styles.css'></head>
-<body><div class='container'>
-<h1>odin performance profiler</h1>
-<textarea id='input' placeholder='Paste code or describe scenario'></textarea>
-<input id='value' placeholder='Optional metric'>
-<button onclick='run()'>Analyze</button>
-<div id='res' class='result'></div>
-</div><script src='script.js'></script></body></html>
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odin Performance Profiler – Algorithmic Complexity, Hot Path & CPU Cost Analysis</title>
+<meta name="description" content="Analyze Odin code for performance bottlenecks. Detect algorithmic complexity, hot loops, memory access patterns, allocation hotspots, and get optimization recommendations.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:         #06080c;
+    --surface:    #0b0f18;
+    --surface-2:  #10151f;
+    --border:     #1a2230;
+    --accent:     #f97316;
+    --accent-dim: rgba(249,115,22,.07);
+    --green:      #22c55e;
+    --green-dim:  rgba(34,197,94,.08);
+    --yellow:     #fbbf24;
+    --yellow-dim: rgba(251,191,36,.07);
+    --red:        #ef4444;
+    --red-dim:    rgba(239,68,68,.07);
+    --blue:       #38bdf8;
+    --blue-dim:   rgba(56,189,248,.07);
+    --purple:     #a855f7;
+    --text:       #cbd5e1;
+    --muted:      #475569;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,.07) 3px, rgba(0,0,0,.07) 4px);
+    pointer-events: none; z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .22;
+    pointer-events: none; z-index: 0;
+}
+
+.wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+    width: 100%;
+    flex: 1;
+}
+
+nav {
+    position: relative; z-index: 2;
+    padding: 18px 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+nav a {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--transition);
+}
+
+nav a:hover { color: var(--accent); }
+nav a::before { content: "<-"; }
+
+header {
+    padding: 36px 0 32px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .5s ease both;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.2rem, 3vw, 1.9rem);
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 10px;
+}
+
+header h1 .acc { color: var(--accent); }
+header p { font-size: .9rem; color: var(--muted); font-style: italic; font-weight: 300; max-width: 560px; }
+
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin: 32px 0;
+    animation: fadeUp .5s .08s ease both;
+}
+
+/* samples */
+.samples-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.sample-btn {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 11px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.sample-btn:hover { color: var(--accent); border-color: rgba(249,115,22,.3); }
+
+/* editor */
+.editor-label {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.editor-label::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.editor-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.editor-wrap:focus-within {
+    border-color: rgba(249,115,22,.4);
+    box-shadow: 0 0 0 3px rgba(249,115,22,.08);
+}
+
+textarea {
+    display: block;
+    width: 100%;
+    min-height: 260px;
+    background: var(--surface-2);
+    border: none;
+    outline: none;
+    padding: 14px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    line-height: 1.65;
+    resize: vertical;
+    tab-size: 4;
+}
+
+textarea::placeholder { color: var(--muted); opacity: .4; }
+
+/* input row */
+.input-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.input-group { display: flex; flex-direction: column; gap: 5px; }
+
+.input-label {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+input[type="number"], select {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    color: var(--text);
+    outline: none;
+    transition: border-color var(--transition), box-shadow var(--transition);
+    -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+input[type="number"]:focus, select:focus {
+    border-color: rgba(249,115,22,.4);
+    box-shadow: 0 0 0 3px rgba(249,115,22,.08);
+}
+
+select { cursor: pointer; appearance: none; }
+
+.btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.btn-run:hover {
+    background: #fb923c;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(249,115,22,.3);
+}
+
+.btn-run:active { transform: translateY(0); }
+
+/* result */
+#result { margin-top: 24px; display: none; animation: fadeUp .35s ease both; }
+#result.visible { display: block; }
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* score */
+.perf-score-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.score-big {
+    font-family: var(--font-mono);
+    font-size: 3.2rem;
+    color: #fff;
+    line-height: 1;
+}
+
+.score-big span { font-size: 1rem; color: var(--muted); }
+
+.score-meta { flex: 1; min-width: 180px; }
+
+.perf-level {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 4px 12px;
+    margin-bottom: 6px;
+}
+
+.lv-fast   { color: var(--green);  background: var(--green-dim);  border: 1px solid rgba(34,197,94,.2); }
+.lv-ok     { color: var(--yellow); background: var(--yellow-dim); border: 1px solid rgba(251,191,36,.2); }
+.lv-slow   { color: var(--red);    background: var(--red-dim);    border: 1px solid rgba(239,68,68,.2); }
+
+.score-bar-wrap { width: 100%; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.score-bar-fill { height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.4,0,.2,1); }
+.bar-fast  { background: linear-gradient(90deg, #16a34a, var(--green)); }
+.bar-ok    { background: linear-gradient(90deg, #b45309, var(--yellow)); }
+.bar-slow  { background: linear-gradient(90deg, #b91c1c, var(--red)); }
+
+/* metrics grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.metric-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 13px;
+}
+
+.mc-red    { border-left: 3px solid var(--red); }
+.mc-yellow { border-left: 3px solid var(--yellow); }
+.mc-green  { border-left: 3px solid var(--green); }
+.mc-blue   { border-left: 3px solid var(--blue); }
+.mc-purple { border-left: 3px solid var(--purple); }
+
+.m-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; display: block; }
+.m-value { font-family: var(--font-mono); font-size: 1.25rem; color: #fff; line-height: 1.1; display: block; }
+.m-sub   { font-size: .64rem; color: var(--muted); font-style: italic; display: block; margin-top: 2px; }
+
+/* complexity badge */
+.complexity-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.cx-badge {
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    border-radius: 3px;
+    padding: 5px 14px;
+    letter-spacing: .04em;
+}
+
+.cx-o1   { color: var(--green);  background: var(--green-dim);  border: 1px solid rgba(34,197,94,.2); }
+.cx-olog { color: #34d399;       background: var(--green-dim);  border: 1px solid rgba(34,197,94,.15); }
+.cx-on   { color: var(--yellow); background: var(--yellow-dim); border: 1px solid rgba(251,191,36,.2); }
+.cx-onl  { color: var(--yellow); background: var(--yellow-dim); border: 1px solid rgba(251,191,36,.15); }
+.cx-on2  { color: var(--red);    background: var(--red-dim);    border: 1px solid rgba(239,68,68,.2); }
+.cx-on3  { color: #dc2626;       background: var(--red-dim);    border: 1px solid rgba(220,38,38,.25); }
+.cx-exp  { color: #dc2626;       background: var(--red-dim);    border: 1px solid rgba(220,38,38,.3); }
+
+/* flame-style hotspot */
+.hotspot-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+
+.hotspot-item {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hs-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.hs-name { font-family: var(--font-mono); font-size: .82rem; color: #fff; }
+
+.hs-badge {
+    font-family: var(--font-mono);
+    font-size: .6rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 2px 8px;
+}
+
+.hs-critical { border-left: 3px solid var(--red);    background: var(--red-dim);    }
+.hs-warning  { border-left: 3px solid var(--yellow); background: var(--yellow-dim); }
+.hs-info     { border-left: 3px solid var(--blue);   background: var(--blue-dim);   }
+
+.hs-critical .hs-badge { background: var(--red-dim);    color: var(--red); }
+.hs-warning  .hs-badge { background: var(--yellow-dim); color: var(--yellow); }
+.hs-info     .hs-badge { background: var(--blue-dim);   color: var(--blue); }
+
+/* cost bar */
+.hs-bar-row { display: flex; align-items: center; gap: 10px; }
+
+.hs-bar-bg {
+    flex: 1;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.hs-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+}
+
+.hs-fill-red    { background: linear-gradient(90deg, #b91c1c, var(--red)); }
+.hs-fill-yellow { background: linear-gradient(90deg, #b45309, var(--yellow)); }
+.hs-fill-blue   { background: linear-gradient(90deg, #0369a1, var(--blue)); }
+
+.hs-cost { font-family: var(--font-mono); font-size: .7rem; color: var(--muted); flex-shrink: 0; width: 50px; text-align: right; }
+
+.hs-desc { font-size: .82rem; color: var(--muted); font-style: italic; font-weight: 300; line-height: 1.5; }
+
+.hs-fix {
+    font-family: var(--font-mono);
+    font-size: .74rem;
+    color: var(--green);
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.15);
+    border-radius: 3px;
+    padding: 8px 12px;
+    white-space: pre-wrap;
+    line-height: 1.55;
+}
+
+/* N input projection */
+.projection-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.proj-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.proj-n     { font-family: var(--font-mono); font-size: .62rem; color: var(--muted); }
+.proj-ops   { font-family: var(--font-mono); font-size: 1.1rem; color: #fff; line-height: 1.1; }
+.proj-label { font-size: .68rem; color: var(--muted); font-style: italic; }
+.proj-card.proj-warn  { border-left: 3px solid var(--yellow); }
+.proj-card.proj-crit  { border-left: 3px solid var(--red); }
+.proj-card.proj-ok    { border-left: 3px solid var(--green); }
+
+/* all good */
+.all-good {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.2);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    color: var(--green);
+}
+
+.all-good::before { content: "[PASS]"; }
+
+/* info */
+.info-section {
+    padding: 36px 0;
+    border-top: 1px solid var(--border);
+    animation: fadeUp .5s .15s ease both;
+}
+
+.info-section h2 { font-family: var(--font-mono); font-size: 1rem; font-weight: 400; color: #fff; margin-bottom: 14px; }
+.info-section p  { font-size: .875rem; color: var(--muted); font-weight: 300; font-style: italic; margin-bottom: 10px; max-width: 580px; }
+.info-section ul { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.info-section ul li { display: flex; gap: 10px; font-family: var(--font-mono); font-size: .76rem; color: var(--text); }
+.info-section ul li::before { content: "->"; color: var(--accent); flex-shrink: 0; }
+
+footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+footer p { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 520px) {
+    .tool-card { padding: 18px; }
+    .input-row { grid-template-columns: 1fr; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+</head>
+<body>
+
+<nav class="wrapper">
+    <a href="/odin-tools/">Odin Tools</a>
+</nav>
+
+<div class="wrapper">
+
+<header>
+    <div class="header-chip">Perf Profiler</div>
+    <h1><span class="acc">Performance</span> Profiler</h1>
+    <p>Paste Odin code to analyze algorithmic complexity, detect hot loops and allocation hotspots, estimate CPU cost at different input sizes, and get specific optimization guidance.</p>
+</header>
+
+<div class="tool-card">
+
+<div class="samples-row">
+    <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--muted);align-self:center">Samples:</span>
+    <button class="sample-btn" onclick="loadSample('nested')">Nested loops</button>
+    <button class="sample-btn" onclick="loadSample('alloc')">Hot allocations</button>
+    <button class="sample-btn" onclick="loadSample('search')">Linear search</button>
+    <button class="sample-btn" onclick="loadSample('good')">Optimized</button>
+</div>
+
+<div class="editor-label">Odin Code</div>
+<div class="editor-wrap">
+    <textarea id="codeInput" placeholder="// Paste Odin code to profile...
+
+update_entities :: proc(entities: []Entity) {
+for i in 0..<len(entities) {
+for j in 0..<len(entities) {
+if entities[i].id != entities[j].id {
+check_collision(entities[i], entities[j])
+}
+}
+}
+}”></textarea>
+</div>
+
+<div class="input-row">
+    <div class="input-group">
+        <span class="input-label">Input size N</span>
+        <input type="number" id="inputN" min="1" value="1000" placeholder="e.g. 1000">
+    </div>
+    <div class="input-group">
+        <span class="input-label">Target platform</span>
+        <select id="platform">
+            <option value="desktop">Desktop (3 GHz)</option>
+            <option value="mobile">Mobile (1 GHz)</option>
+            <option value="console">Console (fixed 60 FPS)</option>
+        </select>
+    </div>
+</div>
+
+<button class="btn-run" onclick="profile()">Profile Code</button>
+
+<div id="result"></div>
+
+
+</div>
+
+<div class="info-section">
+    <h2>What the Profiler Analyzes</h2>
+    <p>The profiler scans for patterns that determine runtime behavior and estimates their cost at your specified input size.</p>
+    <ul>
+        <li>Loop nesting depth -- O(n), O(n^2), O(n^3) complexity detection</li>
+        <li>Dynamic allocations inside hot loops -- GC pressure and fragmentation</li>
+        <li>Random-access patterns vs sequential -- cache miss estimation</li>
+        <li>String operations in tight loops -- hidden allocation costs</li>
+        <li>Recursive calls without tail-call optimization -- stack depth risk</li>
+        <li>Append to dynamic arrays in loops -- potential O(n log n) copy cost</li>
+        <li>Map lookups inside hot paths -- hash collision and allocation overhead</li>
+    </ul>
+</div>
+
+</div>
+
+<footer class="wrapper">
+    <p>Odin Tools -- Performance Profiler</p>
+</footer>
+
+<script>
+var SAMPLES = {
+    nested:
+"// O(n^2) collision check -- common game dev bottleneck\nupdate_entities :: proc(entities: []Entity) {\n    for i in 0..<len(entities) {\n        for j in 0..<len(entities) {\n            if entities[i].id != entities[j].id {\n                check_collision(entities[i], entities[j])\n            }\n        }\n    }\n}\n\n// Also iterating in render\nrender_all :: proc(entities: []Entity, camera: Camera) {\n    for entity in entities {\n        if is_visible(entity, camera) {\n            draw_entity(entity)\n        }\n    }\n}",
+
+    alloc:
+"// Allocations inside hot loop\nprocess_frame :: proc(items: []Item) {\n    for item in items {\n        // Dynamic array created every iteration\n        neighbors := make([dynamic]^Item)\n        defer delete(neighbors)\n\n        for other in items {\n            if distance(item.pos, other.pos) < 10 {\n                append(&neighbors, &other)\n            }\n        }\n\n        // String formatting inside loop\n        label := fmt.aprintf(\"item_%d\", item.id)\n        defer delete(label)\n\n        process_neighbors(neighbors[:])\n    }\n}",
+
+    search:
+"// Linear search -- O(n) per lookup\nfind_entity :: proc(entities: []Entity, id: u64) -> ^Entity {\n    for &e in entities {\n        if e.id == id {\n            return &e\n        }\n    }\n    return nil\n}\n\n// Called inside another loop\nresolve_targets :: proc(projectiles: []Projectile, entities: []Entity) {\n    for &proj in projectiles {\n        target := find_entity(entities, proj.target_id)\n        if target != nil {\n            apply_damage(target, proj.damage)\n        }\n    }\n}",
+
+    good:
+"// O(n) with cache-friendly access\nupdate_positions :: proc(world: ^World, dt: f32) {\n    n := len(world.pos_x)\n    for i in 0..<n {\n        world.pos_x[i] += world.vel_x[i] * dt\n        world.pos_y[i] += world.vel_y[i] * dt\n    }\n}\n\n// Spatial hash for O(1) average lookup\nfind_nearby :: proc(grid: ^SpatialGrid, pos: Vec2, radius: f32) -> []u32 {\n    cell := grid_cell(grid, pos)\n    return grid.cells[cell][:]\n}"
+};
+
+function loadSample(key) {
+    document.getElementById("codeInput").value = SAMPLES[key];
+}
+
+// ── Helpers ──────────────────────────────────────────────
+function fmtBig(n) {
+    if (n >= 1e12) { return (n / 1e12).toFixed(1) + "T"; }
+    if (n >= 1e9)  { return (n / 1e9).toFixed(1) + "B"; }
+    if (n >= 1e6)  { return (n / 1e6).toFixed(1) + "M"; }
+    if (n >= 1e3)  { return (n / 1e3).toFixed(1) + "K"; }
+    return String(Math.round(n));
+}
+
+function opsPerSec(platform) {
+    if (platform === "mobile")  { return 1e9; }
+    if (platform === "console") { return 2e9; }
+    return 3e9; // desktop
+}
+
+// ── Complexity detection ─────────────────────────────────
+function detectComplexity(src) {
+    // Count loop nesting depth
+    var lines = src.split("\n");
+    var maxDepth = 0;
+    var depth = 0;
+    for (var i = 0; i < lines.length; i++) {
+        var l = lines[i];
+        if (/\bfor\b/.test(l)) { depth++; if (depth > maxDepth) { maxDepth = depth; } }
+        // rough brace tracking
+        var opens  = (l.match(/\{/g) || []).length;
+        var closes = (l.match(/\}/g) || []).length;
+        depth = Math.max(0, depth + opens - closes - (/\bfor\b/.test(l) ? 1 : 0));
+    }
+
+    // Recursion
+    var procRe = /(\w+)\s*::\s*proc/g;
+    var procNames = [];
+    var m;
+    while ((m = procRe.exec(src)) !== null) { procNames.push(m[1]); }
+    var isRecursive = false;
+    for (var pi = 0; pi < procNames.length; pi++) {
+        var callRe = new RegExp("\\b" + procNames[pi] + "\\s*\\(");
+        var bodyAfterDecl = src.indexOf(procNames[pi] + " :: proc");
+        if (bodyAfterDecl !== -1) {
+            var rest = src.slice(bodyAfterDecl + procNames[pi].length + 8);
+            if (callRe.test(rest)) { isRecursive = true; }
+        }
+    }
+
+    var cx, cxClass, cxLabel;
+    if (isRecursive) {
+        cx = "recursive";
+        cxClass = "cx-exp";
+        cxLabel = "Recursive (varies)";
+    } else if (maxDepth >= 3) {
+        cx = "n3";
+        cxClass = "cx-on3";
+        cxLabel = "O(n^3)";
+    } else if (maxDepth === 2) {
+        cx = "n2";
+        cxClass = "cx-on2";
+        cxLabel = "O(n^2)";
+    } else if (maxDepth === 1) {
+        cx = "n";
+        cxClass = "cx-on";
+        cxLabel = "O(n)";
+    } else {
+        cx = "1";
+        cxClass = "cx-o1";
+        cxLabel = "O(1)";
+    }
+
+    return { cx: cx, cxClass: cxClass, cxLabel: cxLabel, loopDepth: maxDepth, recursive: isRecursive };
+}
+
+// ── Pattern detection ─────────────────────────────────────
+function detectPatterns(src) {
+    var hotspots = [];
+    var lower = src.toLowerCase();
+
+    // make() inside loop
+    if (/\bfor\b[\s\S]{0,300}make\s*\(/.test(src)) {
+        hotspots.push({
+            sev: "critical",
+            name: "Heap allocation inside hot loop",
+            cost: 95,
+            fillCls: "hs-fill-red",
+            desc: "make() allocates on the heap every iteration. For n=1000 that is 1000 allocations. Each allocation has syscall overhead and fragments the allocator.",
+            fix: "Pre-allocate outside the loop:\n  buf := make([dynamic]^Item, 0, 64)\n  defer delete(buf)\n  for item in items {\n    clear(&buf)\n    // reuse buf...\n  }"
+        });
+    }
+
+    // fmt.aprintf / fmt.tprintf inside loop
+    if (/\bfor\b[\s\S]{0,400}fmt\.(a|t)?printf/.test(src)) {
+        hotspots.push({
+            sev: "critical",
+            name: "String formatting inside loop",
+            cost: 85,
+            fillCls: "hs-fill-red",
+            desc: "fmt.aprintf allocates a new string every call. Inside a loop this creates N allocations and N delete() calls, stressing the allocator.",
+            fix: "Use a pre-allocated buffer:\n  buf: [64]byte\n  for item in items {\n    s := fmt.bprintf(buf[:], \"item_%d\", item.id)\n    // s points into buf, no allocation\n  }"
+        });
+    }
+
+    // append inside loop
+    if (/\bfor\b[\s\S]{0,300}append\s*\(/.test(src)) {
+        hotspots.push({
+            sev: "warning",
+            name: "append() inside loop -- potential reallocation",
+            cost: 60,
+            fillCls: "hs-fill-yellow",
+            desc: "append() may trigger reallocation when capacity is exceeded, copying the entire slice. Without a pre-sized capacity, worst case is O(n log n) total copy work.",
+            fix: "Reserve capacity upfront:\n  result := make([dynamic]T, 0, len(items))\n  for item in items {\n    if condition { append(&result, item) }\n  }"
+        });
+    }
+
+    // nested loops -- O(n^2)
+    if (/\bfor\b[\s\S]{0,200}\bfor\b/.test(src)) {
+        hotspots.push({
+            sev: "critical",
+            name: "Nested loops -- O(n^2) complexity",
+            cost: 100,
+            fillCls: "hs-fill-red",
+            desc: "Two nested loops over the same collection cause quadratic growth. At n=1000 that is 1,000,000 iterations. At n=10,000 it is 100 million.",
+            fix: "Replace with spatial partitioning:\n  // Broadphase: spatial hash O(1) average lookup\n  grid := build_spatial_grid(entities)\n  for entity in entities {\n    nearby := query_grid(grid, entity.pos, radius)\n    for other in nearby { check_collision(entity, other) }\n  }"
+        });
+    }
+
+    // linear search inside loop
+    if (/\bfor\b[\s\S]{1,400}for\b[\s\S]{0,200}\bif\b[\s\S]{0,100}\.\s*id/.test(src)) {
+        hotspots.push({
+            sev: "critical",
+            name: "Linear search inside outer loop -- O(n^2)",
+            cost: 90,
+            fillCls: "hs-fill-red",
+            desc: "A find/search function called inside a loop creates O(n * m) complexity where m is the searched collection size. For 1000 projectiles x 1000 entities = 1M comparisons.",
+            fix: "Build a lookup map before the loop:\n  entity_map := make(map[u64]^Entity)\n  defer delete(entity_map)\n  for &e in entities { entity_map[e.id] = &e }\n\n  for &proj in projectiles {\n    target := entity_map[proj.target_id]  // O(1)\n  }"
+        });
+    }
+
+    // map lookup inside loop
+    if (/\bfor\b[\s\S]{0,300}\[[\s\S]{0,60}\][\s\S]{0,20}/.test(src) && lower.indexOf("map") !== -1) {
+        hotspots.push({
+            sev: "warning",
+            name: "Map access inside hot loop",
+            cost: 55,
+            fillCls: "hs-fill-yellow",
+            desc: "Map lookups involve hashing and potential collision chains. In a hot loop this causes indirect memory access and potential cache misses compared to slice indexing.",
+            fix: "If map is read-only inside the loop, consider caching the lookup result or converting to a sorted slice with binary search for better cache behavior."
+        });
+    }
+
+    // defer inside loop
+    if (/\bfor\b[\s\S]{0,300}\bdefer\b/.test(src)) {
+        hotspots.push({
+            sev: "warning",
+            name: "defer inside loop",
+            cost: 40,
+            fillCls: "hs-fill-yellow",
+            desc: "In Odin, defer runs at the end of the enclosing scope (the proc, not the loop body). Deferred frees inside a loop accumulate until the proc returns, not after each iteration.",
+            fix: "Use an explicit free inside the loop body instead of defer:\n  for item in items {\n    buf := make([]byte, size)\n    // use buf...\n    delete(buf)  // freed each iteration\n  }"
+        });
+    }
+
+    // good patterns -- SoA
+    if (/\w+\.\w+_x\[|\w+\.\w+_y\[|#soa/.test(src)) {
+        hotspots.push({
+            sev: "info",
+            name: "SoA / cache-friendly access detected",
+            cost: 5,
+            fillCls: "hs-fill-blue",
+            desc: "Sequential access to separate arrays (SoA pattern) is cache-optimal. The CPU prefetcher handles linear access efficiently.",
+            fix: "Good pattern. Ensure loop bounds are known at compile time if possible to enable auto-vectorization."
+        });
+    }
+
+    // recursion
+    if (/(\w+)\s*::\s*proc[\s\S]{0,400}\1\s*\(/.test(src)) {
+        hotspots.push({
+            sev: "warning",
+            name: "Recursive call detected",
+            cost: 50,
+            fillCls: "hs-fill-yellow",
+            desc: "Recursion adds a function call frame per level. Deep recursion (thousands of levels) risks stack overflow. Odin does not guarantee tail-call optimization.",
+            fix: "Convert deep recursion to an explicit stack:\n  stack := make([dynamic]Node, 0, 64)\n  defer delete(stack)\n  append(&stack, root)\n  for len(stack) > 0 {\n    node := pop(&stack)\n    // process...\n    append(&stack, node.children[:])\n  }"
+        });
+    }
+
+    return hotspots;
+}
+
+// ── Projection table ─────────────────────────────────────
+function buildProjection(cx, n, platform) {
+    var ops = opsPerSec(platform);
+    var sizes = [n, n * 10, n * 100, n * 1000];
+    var results = [];
+    for (var i = 0; i < sizes.length; i++) {
+        var sz = sizes[i];
+        var count;
+        if      (cx === "1")   { count = 1; }
+        else if (cx === "n")   { count = sz; }
+        else if (cx === "n2")  { count = sz * sz; }
+        else if (cx === "n3")  { count = sz * sz * sz; }
+        else                   { count = sz * sz; } // conservative for recursive/unknown
+        var timeMs = (count / ops) * 1000;
+        var cls = timeMs < 1 ? "proj-ok" : timeMs < 16 ? "proj-warn" : "proj-crit";
+        var timeLabel = timeMs < 0.001 ? "<0.001 ms" : timeMs < 1 ? timeMs.toFixed(3) + " ms" : timeMs < 1000 ? timeMs.toFixed(1) + " ms" : (timeMs / 1000).toFixed(2) + " s";
+        results.push({ n: sz, ops: fmtBig(count), time: timeLabel, cls: cls });
+    }
+    return results;
+}
+
+// ── Score ────────────────────────────────────────────────
+function calcScore(cx, hotspots) {
+    var base = 100;
+    if (cx === "n2")  { base -= 35; }
+    if (cx === "n3")  { base -= 55; }
+    if (cx === "exp" || cx === "recursive") { base -= 30; }
+    for (var i = 0; i < hotspots.length; i++) {
+        if (hotspots[i].sev === "critical") { base -= 20; }
+        if (hotspots[i].sev === "warning")  { base -= 8; }
+    }
+    return Math.max(0, Math.min(100, base));
+}
+
+// ── Main ─────────────────────────────────────────────────
+function profile() {
+    var src      = document.getElementById("codeInput").value;
+    var n        = parseInt(document.getElementById("inputN").value, 10) || 1000;
+    var platform = document.getElementById("platform").value;
+
+    if (!src.trim()) {
+        alert("Please paste some Odin code.");
+        return;
+    }
+
+    var cxInfo   = detectComplexity(src);
+    var hotspots = detectPatterns(src);
+    var score    = calcScore(cxInfo.cx, hotspots);
+    var proj     = buildProjection(cxInfo.cx, n, platform);
+    var ops      = opsPerSec(platform);
+
+    var procCount = (src.match(/\w+\s*::\s*proc/g) || []).length;
+    var loopCount = (src.match(/\bfor\b/g) || []).length;
+    var allocCount = (src.match(/\bmake\s*\(|\bnew\s*\(/g) || []).length;
+    var criticalCount = hotspots.filter(function(h) { return h.sev === "critical"; }).length;
+
+    // score UI
+    var lvCls, lvTxt, barCls;
+    if (score >= 70)      { lvCls = "lv-fast"; lvTxt = "Performant";    barCls = "bar-fast"; }
+    else if (score >= 40) { lvCls = "lv-ok";   lvTxt = "Needs Work";    barCls = "bar-ok"; }
+    else                  { lvCls = "lv-slow";  lvTxt = "Bottlenecks Detected"; barCls = "bar-slow"; }
+
+    var mcCx = cxInfo.cx === "1" ? "mc-green" : cxInfo.cx === "n" ? "mc-yellow" : "mc-red";
+
+    var metricsHTML =
+        "<div class=\"metrics-grid\">" +
+            "<div class=\"metric-card " + mcCx + "\"><span class=\"m-label\">Complexity</span><span class=\"m-value\">" + cxInfo.cxLabel + "</span><span class=\"m-sub\">worst case</span></div>" +
+            "<div class=\"metric-card mc-blue\"><span class=\"m-label\">Procs</span><span class=\"m-value\">" + procCount + "</span><span class=\"m-sub\">detected</span></div>" +
+            "<div class=\"metric-card mc-blue\"><span class=\"m-label\">Loops</span><span class=\"m-value\">" + loopCount + "</span><span class=\"m-sub\">detected</span></div>" +
+            "<div class=\"metric-card " + (allocCount > 3 ? "mc-red" : allocCount > 0 ? "mc-yellow" : "mc-green") + "\"><span class=\"m-label\">Allocations</span><span class=\"m-value\">" + allocCount + "</span><span class=\"m-sub\">make / new calls</span></div>" +
+            "<div class=\"metric-card " + (criticalCount > 0 ? "mc-red" : "mc-green") + "\"><span class=\"m-label\">Critical issues</span><span class=\"m-value\">" + criticalCount + "</span><span class=\"m-sub\">found</span></div>" +
+            "<div class=\"metric-card mc-purple\"><span class=\"m-label\">Loop depth</span><span class=\"m-value\">" + cxInfo.loopDepth + "</span><span class=\"m-sub\">max nesting</span></div>" +
+        "</div>";
+
+    // hotspots
+    var hotspotsHTML = "";
+    if (hotspots.length === 0) {
+        hotspotsHTML = "<div class=\"all-good\"> No critical hotspots detected. Code looks performant.</div>";
+    } else {
+        // sort critical first
+        var sorted = hotspots.slice().sort(function(a, b) {
+            var o = { critical: 0, warning: 1, info: 2 };
+            return (o[a.sev] || 3) - (o[b.sev] || 3);
+        });
+
+        var maxCost = 0;
+        for (var i = 0; i < sorted.length; i++) { if (sorted[i].cost > maxCost) { maxCost = sorted[i].cost; } }
+
+        hotspotsHTML = "<div class=\"hotspot-list\">" +
+            sorted.map(function(h) {
+                var pct = maxCost > 0 ? Math.round((h.cost / maxCost) * 100) : 0;
+                return "<div class=\"hotspot-item hs-" + h.sev + "\">" +
+                    "<div class=\"hs-header\"><span class=\"hs-name\">" + h.name + "</span><span class=\"hs-badge\">" + h.sev + "</span></div>" +
+                    "<div class=\"hs-bar-row\"><div class=\"hs-bar-bg\"><div class=\"hs-bar-fill " + h.fillCls + "\" style=\"width:" + pct + "%\"></div></div><span class=\"hs-cost\">rel " + pct + "%</span></div>" +
+                    "<div class=\"hs-desc\">" + h.desc + "</div>" +
+                    (h.fix ? "<pre class=\"hs-fix\">" + h.fix + "</pre>" : "") +
+
+            "</div>";
+        }).join("") +
+    "</div>";
+}
+
+// projection
+var projHTML = "<div class=\"projection-grid\">" +
+    proj.map(function(p) {
+        return "<div class=\"proj-card " + p.cls + "\">" +
+            "<span class=\"proj-n\">n = " + fmtBig(p.n) + "</span>" +
+            "<span class=\"proj-ops\">" + p.ops + "</span>" +
+            "<span class=\"proj-label\">ops ~ " + p.time + "</span>" +
+        "</div>";
+    }).join("") +
+"</div>";
+
+var resultEl = document.getElementById("result");
+resultEl.innerHTML =
+    "<div class=\"divider\"></div>" +
+
+    "<div class=\"perf-score-row\">" +
+        "<span class=\"score-big\">" + score + "<span>/100</span></span>" +
+        "<div class=\"score-meta\">" +
+            "<div class=\"perf-level " + lvCls + "\">" + lvTxt + "</div>" +
+            "<div class=\"score-bar-wrap\"><div class=\"score-bar-fill " + barCls + "\" style=\"width:" + score + "%\"></div></div>" +
+        "</div>" +
+    "</div>" +
+
+    "<div class=\"complexity-row\"><div class=\"cx-badge " + cxInfo.cxClass + "\">" + cxInfo.cxLabel + "</div></div>" +
+
+    metricsHTML +
+
+    "<div class=\"divider\"></div>" +
+    "<div style=\"font-family:var(--font-mono);font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px\">Cost Projection at N = " + fmtBig(n) + " (" + platform + ")</div>" +
+    projHTML +
+
+    "<div class=\"divider\"></div>" +
+    "<div style=\"font-family:var(--font-mono);font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px\">Hotspot Analysis</div>" +
+    hotspotsHTML;
+
+resultEl.classList.add("visible");
+resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+
+}
+</script>
+
+</body>
+</html>
