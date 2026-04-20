@@ -1,9 +1,1133 @@
-<html><head><meta charset='UTF-8'><title>odin struct packing checker</title>
-<link rel='stylesheet' href='styles.css'></head>
-<body><div class='container'>
-<h1>odin struct packing checker</h1>
-<textarea id='input' placeholder='Paste code or describe scenario'></textarea>
-<input id='value' placeholder='Optional metric'>
-<button onclick='run()'>Analyze</button>
-<div id='res' class='result'></div>
-</div><script src='script.js'></script></body></html>
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odin Struct Packing Checker – Padding Waste, Alignment & Field Reorder Tool</title>
+<meta name="description" content="Check Odin struct field ordering for optimal packing. Detect wasted padding bytes, compare default vs packed vs reordered layouts, and get the optimized Odin struct code output ready to copy.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:         #06080c;
+    --surface:    #0b0f18;
+    --surface-2:  #10151f;
+    --border:     #1a2230;
+    --accent:     #f97316;
+    --accent-dim: rgba(249,115,22,.07);
+    --green:      #22c55e;
+    --green-dim:  rgba(34,197,94,.08);
+    --yellow:     #fbbf24;
+    --yellow-dim: rgba(251,191,36,.07);
+    --red:        #ef4444;
+    --red-dim:    rgba(239,68,68,.07);
+    --blue:       #38bdf8;
+    --blue-dim:   rgba(56,189,248,.07);
+    --text:       #cbd5e1;
+    --muted:      #475569;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,.07) 3px, rgba(0,0,0,.07) 4px);
+    pointer-events: none; z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .22;
+    pointer-events: none; z-index: 0;
+}
+
+.wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+    width: 100%;
+    flex: 1;
+}
+
+nav {
+    position: relative; z-index: 2;
+    padding: 18px 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+nav a {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--transition);
+}
+
+nav a:hover { color: var(--accent); }
+nav a::before { content: "<-"; }
+
+header {
+    padding: 36px 0 32px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .5s ease both;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.2rem, 3vw, 1.9rem);
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 10px;
+}
+
+header h1 .acc { color: var(--accent); }
+header p { font-size: .9rem; color: var(--muted); font-style: italic; font-weight: 300; max-width: 560px; }
+
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin: 32px 0;
+    animation: fadeUp .5s .08s ease both;
+}
+
+.samples-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.sample-btn {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 11px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.sample-btn:hover { color: var(--accent); border-color: rgba(249,115,22,.3); }
+
+.editor-label {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.editor-label::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.editor-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.editor-wrap:focus-within {
+    border-color: rgba(249,115,22,.4);
+    box-shadow: 0 0 0 3px rgba(249,115,22,.08);
+}
+
+textarea {
+    display: block;
+    width: 100%;
+    min-height: 200px;
+    background: var(--surface-2);
+    border: none;
+    outline: none;
+    padding: 14px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    line-height: 1.65;
+    resize: vertical;
+    tab-size: 4;
+}
+
+textarea::placeholder { color: var(--muted); opacity: .4; }
+
+/* options */
+.options-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.opt-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    transition: color var(--transition);
+    user-select: none;
+}
+
+.opt-toggle:hover { color: var(--text); }
+.opt-toggle input[type="checkbox"] { display: none; }
+
+.opt-box {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: transparent;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.opt-toggle input:checked + .opt-box {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.btn-run:hover { background: #fb923c; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(249,115,22,.3); }
+.btn-run:active { transform: translateY(0); }
+
+/* result */
+#result { margin-top: 24px; display: none; animation: fadeUp .35s ease both; }
+#result.visible { display: block; }
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* struct section */
+.struct-block { margin-bottom: 32px; }
+.struct-block:last-child { margin-bottom: 0; }
+
+.struct-name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.struct-name-label {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--accent);
+    letter-spacing: .06em;
+}
+
+.struct-name-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+/* summary metrics */
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.sum-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sum-card.sc-good   { border-left: 3px solid var(--green); }
+.sum-card.sc-warn   { border-left: 3px solid var(--yellow); }
+.sum-card.sc-bad    { border-left: 3px solid var(--red); }
+.sum-card.sc-info   { border-left: 3px solid var(--blue); }
+
+.sc-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sc-value { font-family: var(--font-mono); font-size: 1.3rem; color: #fff; line-height: 1.1; }
+.sc-sub   { font-size: .64rem; color: var(--muted); font-style: italic; }
+
+/* layout comparison */
+.layout-compare {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.layout-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.layout-panel-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.lp-title {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.lp-default { color: var(--muted); }
+.lp-packed  { color: var(--yellow); }
+.lp-optimal { color: var(--green); }
+
+.lp-size {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: #fff;
+}
+
+.layout-panel-body { padding: 12px 14px; }
+
+/* field rows inside panel */
+.lp-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: .72rem;
+}
+
+.lp-field:last-child { border-bottom: none; }
+
+.lp-offset {
+    width: 36px;
+    color: var(--muted);
+    flex-shrink: 0;
+    font-size: .65rem;
+}
+
+.lp-fname {
+    flex: 1;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lp-fsize {
+    width: 28px;
+    text-align: right;
+    color: var(--muted);
+    font-size: .65rem;
+    flex-shrink: 0;
+}
+
+.lp-pad-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    color: var(--red);
+    opacity: .7;
+}
+
+.lp-pad-row .lp-offset { color: var(--red); opacity: .6; }
+
+/* savings banner */
+.savings-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.2);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.savings-text {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--green);
+}
+
+.savings-stats {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.savings-stat {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--green);
+    opacity: .8;
+}
+
+/* no-savings */
+.no-savings {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.2);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--green);
+}
+
+.no-savings::before { content: "[OK]"; }
+
+/* generated code */
+.code-section { margin-bottom: 4px; }
+
+.code-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.code-section-title {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.btn-copy {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.btn-copy:hover { color: var(--green); border-color: rgba(34,197,94,.3); }
+
+.code-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    overflow: hidden;
+    border-bottom: none;
+}
+
+.code-tab {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: .66rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition);
+}
+
+.code-tab:last-child { border-right: none; }
+.code-tab.active { color: var(--accent); background: var(--accent-dim); }
+.code-tab:hover:not(.active) { color: var(--text); }
+
+.code-block {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0 0 var(--radius) var(--radius);
+    padding: 16px 18px;
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    line-height: 1.65;
+    color: var(--text);
+    white-space: pre;
+    overflow-x: auto;
+}
+
+/* packing efficiency bar */
+.eff-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.eff-label {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    width: 120px;
+    flex-shrink: 0;
+}
+
+.eff-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.eff-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+
+.ef-good { background: linear-gradient(90deg, #16a34a, var(--green)); }
+.ef-warn { background: linear-gradient(90deg, #b45309, var(--yellow)); }
+.ef-bad  { background: linear-gradient(90deg, #b91c1c, var(--red)); }
+
+.eff-pct {
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    color: var(--text);
+    width: 44px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* recommendations */
+.rec-list { display: flex; flex-direction: column; gap: 7px; }
+
+.rec-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    font-size: .845rem;
+}
+
+.rec-item.ri-high   { border-left: 3px solid var(--red); }
+.rec-item.ri-medium { border-left: 3px solid var(--yellow); }
+.rec-item.ri-low    { border-left: 3px solid var(--green); }
+
+.ri-icon { font-family: var(--font-mono); font-size: .72rem; flex-shrink: 0; margin-top: 2px; }
+.ri-high   .ri-icon { color: var(--red); }
+.ri-medium .ri-icon { color: var(--yellow); }
+.ri-low    .ri-icon { color: var(--green); }
+
+.ri-body { flex: 1; }
+.ri-title { font-family: var(--font-mono); font-size: .78rem; color: var(--text); margin-bottom: 3px; }
+.ri-desc  { font-size: .8rem; color: var(--muted); font-weight: 300; font-style: italic; line-height: 1.5; }
+
+/* info */
+.info-section {
+    padding: 36px 0;
+    border-top: 1px solid var(--border);
+    animation: fadeUp .5s .15s ease both;
+}
+
+.info-section h2 { font-family: var(--font-mono); font-size: 1rem; font-weight: 400; color: #fff; margin-bottom: 14px; }
+.info-section p  { font-size: .875rem; color: var(--muted); font-weight: 300; font-style: italic; margin-bottom: 10px; max-width: 580px; }
+.info-section ul { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.info-section ul li { display: flex; gap: 10px; font-family: var(--font-mono); font-size: .76rem; color: var(--text); }
+.info-section ul li::before { content: "->"; color: var(--accent); flex-shrink: 0; }
+
+footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+footer p { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 580px) {
+    .tool-card { padding: 18px; }
+    .layout-compare { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+</head>
+<body>
+
+<nav class="wrapper">
+    <a href="/odin-tools/">Odin Tools</a>
+</nav>
+
+<div class="wrapper">
+
+<header>
+    <div class="header-chip">Struct Packing</div>
+    <h1><span class="acc">Struct Packing</span> Checker</h1>
+    <p>Paste Odin struct definitions to detect wasted padding bytes, compare default vs packed vs reordered layouts side by side, and get the optimized struct code ready to copy.</p>
+</header>
+
+<div class="tool-card">
+
+<div class="samples-row">
+    <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--muted);align-self:center">Samples:</span>
+    <button class="sample-btn" onclick="loadSample('worst')">Worst case</button>
+    <button class="sample-btn" onclick="loadSample('typical')">Typical entity</button>
+    <button class="sample-btn" onclick="loadSample('network')">Network packet</button>
+    <button class="sample-btn" onclick="loadSample('perfect')">Already optimal</button>
+</div>
+
+<div class="editor-label">Odin Struct Definitions</div>
+<div class="editor-wrap">
+    <textarea id="codeInput" placeholder="// Paste Odin struct definitions here...
+
+Particle :: struct {
+alive:    bool,
+position: f64,
+color:    u8,
+mass:     f32,
+tag:      bool,
+velocity: f64,
+}”></textarea>
+</div>
+
+
+<div class="options-row">
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_compare" checked>
+        <span class="opt-box">v</span>
+        3-way comparison
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_code" checked>
+        <span class="opt-box">v</span>
+        Generate Odin code
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_array" checked>
+        <span class="opt-box">v</span>
+        Array savings
+    </label>
+</div>
+
+<button class="btn-run" onclick="check()">Check Struct Packing</button>
+
+<div id="result"></div>
+
+
+</div>
+
+<div class="info-section">
+    <h2>Odin Struct Packing Rules</h2>
+    <p>Odin follows standard platform ABI alignment. Each field sits at the smallest offset that is a multiple of the field's alignment requirement.</p>
+    <ul>
+        <li>bool / u8 / i8 -- 1 byte size and alignment, no padding needed</li>
+        <li>u16 / i16 -- 2 byte alignment, may add 1 byte padding after u8/bool</li>
+        <li>u32 / i32 / f32 -- 4 byte alignment, may waste up to 3 bytes</li>
+        <li>u64 / i64 / f64 / pointers -- 8 byte alignment, may waste up to 7 bytes</li>
+        <li>Optimal rule: order fields largest-to-smallest alignment</li>
+        <li>#packed removes all padding but may cause slow misaligned reads on some CPUs</li>
+        <li>Trailing padding aligns the struct size to its largest field alignment</li>
+    </ul>
+</div>
+
+</div>
+
+<footer class="wrapper">
+    <p>Odin Tools -- Struct Packing Checker</p>
+</footer>
+
+<script>
+var SAMPLES = {
+    worst:
+"// Worst-case field order -- maximum padding waste\nParticle :: struct {\n    alive:    bool,\n    position: f64,\n    color:    u8,\n    mass:     f32,\n    tag:      bool,\n    velocity: f64,\n}",
+
+    typical:
+"// Typical game entity -- common in game dev\nEntity :: struct {\n    active:   bool,\n    id:       u64,\n    x:        f32,\n    y:        f32,\n    health:   i16,\n    flags:    u8,\n    name_len: u8,\n    speed:    f32,\n}",
+
+    network:
+"// Network packet header -- often needs exact packing\nPacketHeader :: struct {\n    magic:     u8,\n    version:   u8,\n    msg_type:  u16,\n    timestamp: u64,\n    seq:       u32,\n    checksum:  u16,\n    flags:     u8,\n    reserved:  u8,\n}",
+
+    perfect:
+"// Already optimally ordered\nVec4 :: struct {\n    x: f32,\n    y: f32,\n    z: f32,\n    w: f32,\n}"
+};
+
+function loadSample(key) {
+    document.getElementById("codeInput").value = SAMPLES[key];
+}
+
+// ── Type tables ──────────────────────────────────────────
+var TYPE_SIZES = {
+    "bool":1,"byte":1,"u8":1,"i8":1,
+    "u16":2,"i16":2,"f16":2,
+    "u32":4,"i32":4,"f32":4,"rune":4,
+    "u64":8,"i64":8,"f64":8,"uint":8,"int":8,"uintptr":8,
+    "rawptr":8,"cstring":8,
+    "string":16,"any":16
+};
+
+var TYPE_ALIGN = {
+    "bool":1,"byte":1,"u8":1,"i8":1,
+    "u16":2,"i16":2,"f16":2,
+    "u32":4,"i32":4,"f32":4,"rune":4,
+    "u64":8,"i64":8,"f64":8,"uint":8,"int":8,"uintptr":8,
+    "rawptr":8,"cstring":8,
+    "string":8,"any":8
+};
+
+function getSize(t) {
+    t = t.trim();
+    var a = t.match(/^\[(\d+)\](.+)$/);
+    if (a) { return parseInt(a[1],10) * getSize(a[2].trim()); }
+    if (t.indexOf("[dynamic]")===0||(t[0]==="["&&t[1]==="]")) { return 24; }
+    if (t[0]==="^") { return 8; }
+    return TYPE_SIZES[t] || 0;
+}
+
+function getAlign(t) {
+    t = t.trim();
+    var a = t.match(/^\[(\d+)\](.+)$/);
+    if (a) { return getAlign(a[2].trim()); }
+    if (t.indexOf("[dynamic]")===0||(t[0]==="["&&t[1]==="]")) { return 8; }
+    if (t[0]==="^") { return 8; }
+    return TYPE_ALIGN[t] || 1;
+}
+
+function alignUp(off, al) {
+    if (al <= 1) { return off; }
+    return Math.ceil(off / al) * al;
+}
+
+function parseStructs(src) {
+    var structs = [];
+    var re = /(\w+)\s*::\s*struct\s*\{([^}]*)\}/g;
+    var m;
+    while ((m = re.exec(src)) !== null) {
+        var name = m[1];
+        var body = m[2];
+        var fields = [];
+        var fr = /(\w+)\s*:\s*([^,\/\n\r]+)/g;
+        var fm;
+        while ((fm = fr.exec(body)) !== null) {
+            var fn = fm[1].trim();
+            var ft = fm[2].trim().replace(/,.*$/,"").trim();
+            var sz = getSize(ft);
+            var al = getAlign(ft);
+            if (sz > 0) { fields.push({ name: fn, type: ft, size: sz, align: al }); }
+        }
+        if (fields.length > 0) { structs.push({ name: name, fields: fields }); }
+    }
+    return structs;
+}
+
+function buildLayout(fields) {
+    var off = 0, maxAl = 1, result = [];
+    for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        var aligned = alignUp(off, f.align);
+        var pad = aligned - off;
+        result.push({ name: f.name, type: f.type, size: f.size, align: f.align, offset: aligned, padding: pad });
+        off = aligned + f.size;
+        if (f.align > maxAl) { maxAl = f.align; }
+    }
+    var rawEnd = off;
+    var total  = alignUp(rawEnd, maxAl);
+    var trail  = total - rawEnd;
+    return { fields: result, total: total, trailing: trail, maxAlign: maxAl };
+}
+
+function totalPadding(lay) {
+    var p = lay.trailing;
+    for (var i = 0; i < lay.fields.length; i++) { p += lay.fields[i].padding; }
+    return p;
+}
+
+function optimalOrder(fields) {
+    return fields.slice().sort(function(a, b) {
+        if (b.align !== a.align) { return b.align - a.align; }
+        return b.size - a.size;
+    });
+}
+
+function packedLayout(fields) {
+    // #packed: no alignment padding
+    var off = 0, result = [];
+    for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        result.push({ name: f.name, type: f.type, size: f.size, align: 1, offset: off, padding: 0 });
+        off += f.size;
+    }
+    return { fields: result, total: off, trailing: 0, maxAlign: 1 };
+}
+
+// ── Render a layout panel ────────────────────────────────
+function renderLayoutPanel(titleCls, title, layout, pad) {
+    var html = "<div class=\"layout-panel\">" +
+        "<div class=\"layout-panel-header\">" +
+            "<span class=\"lp-title " + titleCls + "\">" + title + "</span>" +
+            "<span class=\"lp-size\">" + layout.total + " B</span>" +
+        "</div>" +
+        "<div class=\"layout-panel-body\">";
+
+    for (var i = 0; i < layout.fields.length; i++) {
+        var f = layout.fields[i];
+        if (f.padding > 0) {
+            html += "<div class=\"lp-pad-row\"><span class=\"lp-offset\">+" + (f.offset - f.padding) + "</span><span style=\"flex:1\">pad (" + f.padding + "B)</span></div>";
+        }
+        html += "<div class=\"lp-field\">" +
+            "<span class=\"lp-offset\">+" + f.offset + "</span>" +
+            "<span class=\"lp-fname\" title=\"" + f.name + ": " + f.type + "\">" + f.name + "</span>" +
+            "<span class=\"lp-fsize\">" + f.size + "B</span>" +
+        "</div>";
+    }
+
+    if (layout.trailing > 0) {
+        html += "<div class=\"lp-pad-row\"><span class=\"lp-offset\">+" + layout.total + "</span><span style=\"flex:1\">trail (" + layout.trailing + "B)</span></div>";
+    }
+
+    html += "<div style=\"padding-top:8px;font-family:var(--font-mono);font-size:.62rem;color:var(--muted)\">pad: " + pad + "B wasted</div>";
+    html += "</div></div>";
+    return html;
+}
+
+// ── Generate Odin code ───────────────────────────────────
+function genCode(name, fields, variant) {
+    var indent = "    ";
+    var maxName = 0;
+    for (var i = 0; i < fields.length; i++) {
+        if (fields[i].name.length > maxName) { maxName = fields[i].name.length; }
+    }
+
+    var lines = [];
+    if (variant === "packed") {
+        lines.push(name + " :: struct #packed {");
+    } else {
+        lines.push(name + " :: struct {");
+    }
+
+    for (var j = 0; j < fields.length; j++) {
+        var f = fields[j];
+        var pad = "";
+        for (var p = f.name.length; p < maxName; p++) { pad += " "; }
+        lines.push(indent + f.name + ":" + pad + " " + f.type + ",");
+    }
+    lines.push("}");
+    return lines.join("\n");
+}
+
+// ── Recommendations ──────────────────────────────────────
+function buildRecs(lay, optLay, packLay, savings, structName, arrOpt) {
+    var recs = [];
+    var padDefault = totalPadding(lay);
+    var eff = Math.round(((lay.total - padDefault) / lay.total) * 100);
+
+    if (savings > 0) {
+        recs.push({
+            cls: "ri-high", icon: "[!]",
+            title: structName + " wastes " + padDefault + " bytes (" + (100-eff) + "% padding)",
+            desc: "Reordering fields largest-to-smallest alignment saves " + savings + " bytes (" + Math.round(savings/lay.total*100) + "% reduction). " + (arrOpt ? "In an array of 10,000 items that saves " + (savings * 10000 / 1024).toFixed(0) + " KB." : "")
+        });
+    }
+
+    if (lay.total > 64) {
+        recs.push({
+            cls: "ri-medium", icon: "[~]",
+            title: structName + " spans " + Math.ceil(lay.total/64) + " cache lines (" + lay.total + " bytes)",
+            desc: "Structs over 64 bytes cause cache line splits when iterating. Consider splitting hot fields into a separate smaller struct."
+        });
+    }
+
+    var bools = 0;
+    for (var i = 0; i < lay.fields.length; i++) {
+        if (lay.fields[i].type === "bool") { bools++; }
+    }
+    if (bools >= 3) {
+        recs.push({
+            cls: "ri-medium", icon: "[~]",
+            title: bools + " bool fields -- consider bit_set",
+            desc: "Each bool is 1 byte min. " + bools + " bools = " + bools + " bytes. A bit_set packs up to 8 flags in 1 byte:\n  Flags :: bit_set[Flag]; Flag :: enum { Alive, Active, Visible }"
+        });
+    }
+
+    if (packLay.total < optLay.total && savings === 0) {
+        recs.push({
+            cls: "ri-low", icon: "[i]",
+            title: "#packed saves " + (lay.total - packLay.total) + " bytes vs default",
+            desc: "Field order is already optimal. Using #packed can save trailing padding at the cost of potential misaligned reads. Only use if memory is critical and you benchmark the tradeoff."
+        });
+    }
+
+    if (recs.length === 0) {
+        recs.push({
+            cls: "ri-low", icon: "[v]",
+            title: structName + " field order is already optimal",
+            desc: "No padding waste can be eliminated by reordering. Packing efficiency is " + eff + "%."
+        });
+    }
+    return recs;
+}
+
+// ── Active code tab state ────────────────────────────────
+var activeTab = "reordered";
+
+function setCodeTab(t, blockId) {
+    activeTab = t;
+    var tabs = document.querySelectorAll(".code-tab");
+    tabs.forEach(function(tb) { tb.classList.remove("active"); });
+    var active = document.querySelector("[data-tab='" + t + "']");
+    if (active) { active.classList.add("active"); }
+
+    var reorderedEl = document.getElementById("code_reordered_" + blockId);
+    var packedEl    = document.getElementById("code_packed_"    + blockId);
+    var defaultEl   = document.getElementById("code_default_"   + blockId);
+
+    if (reorderedEl) { reorderedEl.style.display = t === "reordered" ? "block" : "none"; }
+    if (packedEl)    { packedEl.style.display    = t === "packed"    ? "block" : "none"; }
+    if (defaultEl)   { defaultEl.style.display   = t === "default"   ? "block" : "none"; }
+}
+
+function copyCode(blockId) {
+    var el = document.getElementById("code_" + activeTab + "_" + blockId);
+    if (!el) { return; }
+    var txt = el.innerText || el.textContent;
+    navigator.clipboard.writeText(txt)
+        .then(function() {
+            var btn = document.querySelector("[data-copy='" + blockId + "']");
+            if (btn) { btn.textContent = "Copied!"; setTimeout(function() { btn.textContent = "Copy"; }, 1800); }
+        })
+        .catch(function() {});
+}
+
+// ── Main ─────────────────────────────────────────────────
+function check() {
+    var src      = document.getElementById("codeInput").value;
+    var showCmp  = document.getElementById("opt_compare").checked;
+    var showCode = document.getElementById("opt_code").checked;
+    var showArr  = document.getElementById("opt_array").checked;
+
+    if (!src.trim()) {
+        alert("Please paste an Odin struct definition.");
+        return;
+    }
+
+    var structs = parseStructs(src);
+    if (structs.length === 0) {
+        alert("No valid Odin struct found.\nExpected format:\nMyStruct :: struct { field: Type, ... }");
+        return;
+    }
+
+    var html = "<div class=\"divider\"></div>";
+
+    for (var si = 0; si < structs.length; si++) {
+        var st      = structs[si];
+        var bid     = "s" + si;
+        var lay     = buildLayout(st.fields);
+        var optFlds = optimalOrder(st.fields);
+        var optLay  = buildLayout(optFlds);
+        var packLay = packedLayout(st.fields);
+        var padDef  = totalPadding(lay);
+        var padOpt  = totalPadding(optLay);
+        var savings = lay.total - optLay.total;
+        var eff     = lay.total > 0 ? Math.round(((lay.total - padDef) / lay.total) * 100) : 100;
+        var optEff  = optLay.total > 0 ? Math.round(((optLay.total - padOpt) / optLay.total) * 100) : 100;
+
+        html += "<div class=\"struct-block\">";
+        html += "<div class=\"struct-name-row\"><span class=\"struct-name-label\">" + st.name + " :: struct</span><div class=\"struct-name-line\"></div></div>";
+
+        // Summary metrics
+        var sizeCls = lay.total <= 32 ? "sc-good" : lay.total <= 64 ? "sc-info" : "sc-warn";
+        var padCls  = padDef === 0 ? "sc-good" : padDef <= 4 ? "sc-info" : padDef <= 12 ? "sc-warn" : "sc-bad";
+        var effCls  = eff >= 90 ? "sc-good" : eff >= 70 ? "sc-warn" : "sc-bad";
+        var clCount = Math.ceil(lay.total / 64);
+
+        html += "<div class=\"summary-grid\">" +
+            "<div class=\"sum-card " + sizeCls + "\"><span class=\"sc-label\">Total size</span><span class=\"sc-value\">" + lay.total + "</span><span class=\"sc-sub\">bytes</span></div>" +
+            "<div class=\"sum-card " + padCls + "\"><span class=\"sc-label\">Padding</span><span class=\"sc-value\">" + padDef + "</span><span class=\"sc-sub\">bytes wasted</span></div>" +
+            "<div class=\"sum-card " + effCls + "\"><span class=\"sc-label\">Efficiency</span><span class=\"sc-value\">" + eff + "%</span><span class=\"sc-sub\">data density</span></div>" +
+            "<div class=\"sum-card " + (clCount > 1 ? "sc-warn" : "sc-good") + "\"><span class=\"sc-label\">Cache lines</span><span class=\"sc-value\">" + clCount + "</span><span class=\"sc-sub\">" + (clCount > 1 ? "may split" : "fits in one") + "</span></div>" +
+            "<div class=\"sum-card sc-info\"><span class=\"sc-label\">Fields</span><span class=\"sc-value\">" + st.fields.length + "</span><span class=\"sc-sub\">total</span></div>" +
+            "<div class=\"sum-card " + (savings > 0 ? "sc-bad" : "sc-good") + "\"><span class=\"sc-label\">Optimal size</span><span class=\"sc-value\">" + optLay.total + "</span><span class=\"sc-sub\">" + (savings > 0 ? "-" + savings + "B savings" : "already min") + "</span></div>" +
+        "</div>";
+
+        // Efficiency bars
+        html += "<div class=\"divider\"></div>";
+        var efClsDef = eff >= 90 ? "ef-good" : eff >= 70 ? "ef-warn" : "ef-bad";
+        var efClsOpt = optEff >= 90 ? "ef-good" : optEff >= 70 ? "ef-warn" : "ef-bad";
+        html += "<div class=\"eff-row\"><span class=\"eff-label\">Default layout</span><div class=\"eff-bar-bg\"><div class=\"eff-bar-fill " + efClsDef + "\" style=\"width:" + eff + "%\"></div></div><span class=\"eff-pct\">" + eff + "%</span></div>";
+        html += "<div class=\"eff-row\"><span class=\"eff-label\">Optimal order</span><div class=\"eff-bar-bg\"><div class=\"eff-bar-fill " + efClsOpt + "\" style=\"width:" + optEff + "%\"></div></div><span class=\"eff-pct\">" + optEff + "%</span></div>";
+        html += "<div class=\"eff-row\"><span class=\"eff-label\">#packed</span><div class=\"eff-bar-bg\"><div class=\"eff-bar-fill ef-good\" style=\"width:100%\"></div></div><span class=\"eff-pct\">100%</span></div>";
+
+        // Savings banner
+        html += "<div class=\"divider\"></div>";
+        if (savings > 0) {
+            var arrSave = showArr ? " | 10K items: " + ((savings * 10000)/1024).toFixed(0) + "KB saved" : "";
+            html += "<div class=\"savings-banner\">" +
+                "<span class=\"savings-text\">Reordering saves " + savings + " bytes (" + Math.round(savings/lay.total*100) + "% reduction)</span>" +
+                "<div class=\"savings-stats\">" +
+                    "<span class=\"savings-stat\">default: " + lay.total + "B</span>" +
+                    "<span class=\"savings-stat\">optimal: " + optLay.total + "B</span>" +
+                    "<span class=\"savings-stat\">#packed: " + packLay.total + "B" + arrSave + "</span>" +
+                "</div>" +
+            "</div>";
+        } else {
+            html += "<div class=\"no-savings\">Field order is already optimal. Zero bytes wasted by reordering.</div>";
+        }
+
+        // 3-way comparison
+        if (showCmp) {
+            html += "<div class=\"layout-compare\">" +
+                renderLayoutPanel("lp-default", "Default", lay, padDef) +
+                renderLayoutPanel("lp-optimal", "Reordered (optimal)", optLay, padOpt) +
+                renderLayoutPanel("lp-packed",  "#packed", packLay, 0) +
+            "</div>";
+        }
+
+        // Generated code
+        if (showCode) {
+            var codeDefault   = genCode(st.name, st.fields, "default");
+            var codeReordered = genCode(st.name, optFlds,   "default");
+            var codePacked    = genCode(st.name, st.fields, "packed");
+
+            html += "<div class=\"code-section\">" +
+                "<div class=\"code-section-header\">" +
+                    "<span class=\"code-section-title\">Generated Odin Code</span>" +
+                    "<button class=\"btn-copy\" data-copy=\"" + bid + "\" onclick=\"copyCode('" + bid + "')\">Copy</button>" +
+                "</div>" +
+                "<div class=\"code-tabs\">" +
+                    "<button class=\"code-tab active\" data-tab=\"reordered\" onclick=\"setCodeTab('reordered','" + bid + "')\">Reordered</button>" +
+                    "<button class=\"code-tab\" data-tab=\"packed\" onclick=\"setCodeTab('packed','" + bid + "')\">Packed</button>" +
+                    "<button class=\"code-tab\" data-tab=\"default\" onclick=\"setCodeTab('default','" + bid + "')\">Original</button>" +
+                "</div>" +
+                "<div id=\"code_reordered_" + bid + "\" class=\"code-block\">" + codeReordered + "</div>" +
+                "<div id=\"code_packed_"    + bid + "\" class=\"code-block\" style=\"display:none\">" + codePacked    + "</div>" +
+                "<div id=\"code_default_"   + bid + "\" class=\"code-block\" style=\"display:none\">" + codeDefault   + "</div>" +
+            "</div>";
+        }
+
+        // Recommendations
+        var recs = buildRecs(lay, optLay, packLay, savings, st.name, showArr);
+        html += "<div class=\"divider\"></div><div class=\"rec-list\">" +
+            recs.map(function(r) {
+                return "<div class=\"rec-item " + r.cls + "\">" +
+                    "<span class=\"ri-icon\">" + r.icon + "</span>" +
+                    "<div class=\"ri-body\"><div class=\"ri-title\">" + r.title + "</div><div class=\"ri-desc\">" + r.desc + "</div></div>" +
+                "</div>";
+            }).join("") +
+        "</div>";
+
+        html += "</div>"; // struct-block
+
+        if (si < structs.length - 1) {
+            html += "<div class=\"divider\" style=\"margin:28px 0;border-top:2px solid var(--border)\"></div>";
+        }
+    }
+
+    var resultEl = document.getElementById("result");
+    resultEl.innerHTML = html;
+    resultEl.classList.add("visible");
+    resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+</script>
+
+</body>
+</html>
