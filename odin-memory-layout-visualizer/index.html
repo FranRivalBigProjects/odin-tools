@@ -1,9 +1,966 @@
-<html><head><meta charset='UTF-8'><title>odin memory layout visualizer</title>
-<link rel='stylesheet' href='styles.css'></head>
-<body><div class='container'>
-<h1>odin memory layout visualizer</h1>
-<textarea id='input' placeholder='Paste code or describe scenario'></textarea>
-<input id='value' placeholder='Optional metric'>
-<button onclick='run()'>Analyze</button>
-<div id='res' class='result'></div>
-</div><script src='script.js'></script></body></html>
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odin Memory Layout Visualizer – Struct Byte Diagram, Offsets & Alignment</title>
+<meta name="description" content="Visualize Odin struct memory layout at the byte level. See field offsets, alignment padding, cache line boundaries, and compare default vs packed vs reordered layouts side by side.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:         #06080c;
+    --surface:    #0b0f18;
+    --surface-2:  #10151f;
+    --border:     #1a2230;
+    --accent:     #f97316;
+    --accent-dim: rgba(249,115,22,.07);
+    --text:       #cbd5e1;
+    --muted:      #475569;
+
+    /* field colors */
+    --c0: #3b82f6;
+    --c1: #22c55e;
+    --c2: #f97316;
+    --c3: #a855f7;
+    --c4: #ec4899;
+    --c5: #14b8a6;
+    --c6: #f59e0b;
+    --c7: #ef4444;
+    --c8: #6366f1;
+    --c9: #84cc16;
+    --pad: #1e2335;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,.07) 3px, rgba(0,0,0,.07) 4px);
+    pointer-events: none; z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .22;
+    pointer-events: none; z-index: 0;
+}
+
+.wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+    width: 100%;
+    flex: 1;
+}
+
+nav {
+    position: relative; z-index: 2;
+    padding: 18px 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+nav a {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--transition);
+}
+
+nav a:hover { color: var(--accent); }
+nav a::before { content: "<-"; }
+
+header {
+    padding: 36px 0 32px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .5s ease both;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.2rem, 3vw, 1.9rem);
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 10px;
+}
+
+header h1 .acc { color: var(--accent); }
+header p { font-size: .9rem; color: var(--muted); font-style: italic; font-weight: 300; max-width: 520px; }
+
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin: 32px 0;
+    animation: fadeUp .5s .08s ease both;
+}
+
+/* editor */
+.editor-label {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.editor-label::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.editor-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.editor-wrap:focus-within {
+    border-color: rgba(249,115,22,.4);
+    box-shadow: 0 0 0 3px rgba(249,115,22,.08);
+}
+
+textarea {
+    display: block;
+    width: 100%;
+    min-height: 180px;
+    background: var(--surface-2);
+    border: none;
+    outline: none;
+    padding: 14px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    line-height: 1.65;
+    resize: vertical;
+    tab-size: 4;
+}
+
+textarea::placeholder { color: var(--muted); opacity: .45; }
+
+/* samples */
+.samples-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.sample-btn {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 11px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.sample-btn:hover { color: var(--accent); border-color: rgba(249,115,22,.3); }
+
+/* options */
+.options-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.opt-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    transition: color var(--transition);
+    user-select: none;
+}
+
+.opt-toggle:hover { color: var(--text); }
+.opt-toggle input[type="checkbox"] { display: none; }
+
+.opt-box {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: transparent;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.opt-toggle input:checked + .opt-box {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* button */
+.btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.btn-run:hover {
+    background: #fb923c;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(249,115,22,.3);
+}
+
+.btn-run:active { transform: translateY(0); }
+
+/* result */
+#result { margin-top: 24px; display: none; animation: fadeUp .35s ease both; }
+#result.visible { display: block; }
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* metrics */
+.metrics-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.metric-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.m-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.m-value { font-family: var(--font-mono); font-size: 1.3rem; color: #fff; line-height: 1.1; }
+.m-sub   { font-size: .66rem; color: var(--muted); font-style: italic; }
+
+/* VIEW TABS */
+.view-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+}
+
+.view-tab {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition);
+}
+
+.view-tab:last-child { border-right: none; }
+.view-tab.active { color: var(--accent); background: var(--accent-dim); }
+.view-tab:hover:not(.active) { color: var(--text); }
+
+/* ── BYTE DIAGRAM ── */
+.diagram-wrap {
+    margin-bottom: 20px;
+}
+
+.diagram-title {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+}
+
+/* offset ruler */
+.byte-ruler {
+    display: flex;
+    margin-bottom: 4px;
+    overflow-x: auto;
+}
+
+.ruler-cell {
+    min-width: 20px;
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: .52rem;
+    color: var(--muted);
+    text-align: center;
+    border-right: 1px solid transparent;
+    user-select: none;
+}
+
+.ruler-cell.cl-mark {
+    color: rgba(249,115,22,.7);
+    border-right: 1px solid rgba(249,115,22,.3);
+}
+
+/* byte grid */
+.byte-grid {
+    display: flex;
+    flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.byte-cell {
+    min-width: 20px;
+    height: 28px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: .55rem;
+    color: rgba(0,0,0,.75);
+    border-right: 1px solid rgba(0,0,0,.2);
+    position: relative;
+    cursor: default;
+    transition: filter var(--transition);
+}
+
+.byte-cell:last-child { border-right: none; }
+.byte-cell:hover { filter: brightness(1.2); }
+
+.byte-cell.pad-cell {
+    background: var(--pad) !important;
+    color: rgba(255,255,255,.2);
+    font-size: .5rem;
+}
+
+.byte-cell.cl-boundary {
+    border-left: 2px solid rgba(249,115,22,.6) !important;
+}
+
+/* field legend */
+.field-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    color: var(--text);
+}
+
+.legend-swatch {
+    width: 12px; height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.legend-pad {
+    width: 12px; height: 12px;
+    border-radius: 2px;
+    background: var(--pad);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+/* field table */
+.field-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .82rem;
+    font-family: var(--font-mono);
+    margin-bottom: 12px;
+}
+
+.field-table th {
+    font-size: .6rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+}
+
+.field-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.field-table tr:last-child td { border-bottom: none; }
+.field-table tr:hover td { background: var(--surface-2); }
+
+.td-swatch {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.td-pad { color: var(--muted); font-style: italic; }
+
+/* comparison section */
+.compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 4px;
+}
+
+.compare-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+}
+
+.compare-label {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cl-default { color: var(--muted); }
+.cl-optimal { color: #22c55e; }
+
+.compare-size {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    color: #fff;
+    margin-bottom: 4px;
+    line-height: 1;
+}
+
+.compare-sub { font-size: .72rem; color: var(--muted); font-style: italic; }
+
+.savings-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: #22c55e;
+    background: rgba(34,197,94,.08);
+    border: 1px solid rgba(34,197,94,.2);
+    border-radius: 3px;
+    padding: 4px 12px;
+    margin-top: 8px;
+}
+
+/* info */
+.info-section {
+    padding: 36px 0;
+    border-top: 1px solid var(--border);
+    animation: fadeUp .5s .15s ease both;
+}
+
+.info-section h2 { font-family: var(--font-mono); font-size: 1rem; font-weight: 400; color: #fff; margin-bottom: 14px; }
+.info-section p  { font-size: .875rem; color: var(--muted); font-weight: 300; font-style: italic; margin-bottom: 10px; max-width: 580px; }
+.info-section ul { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.info-section ul li { display: flex; gap: 10px; font-family: var(--font-mono); font-size: .76rem; color: var(--text); }
+.info-section ul li::before { content: "->"; color: var(--accent); flex-shrink: 0; }
+
+footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+footer p { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 540px) {
+    .tool-card { padding: 18px; }
+    .compare-grid { grid-template-columns: 1fr; }
+    .metrics-row { grid-template-columns: 1fr 1fr 1fr; }
+    .byte-cell { min-width: 16px; height: 22px; font-size: .45rem; }
+}
+</style>
+
+</head>
+<body>
+
+<nav class="wrapper">
+    <a href="/odin-tools/">Odin Tools</a>
+</nav>
+
+<div class="wrapper">
+
+<header>
+    <div class="header-chip">Memory Visualizer</div>
+    <h1><span class="acc">Memory Layout</span> Visualizer</h1>
+    <p>Paste Odin struct definitions and see a byte-level diagram with field offsets, alignment padding, cache line boundaries, and an optimized layout comparison.</p>
+</header>
+
+<div class="tool-card">
+
+<div class="samples-row">
+    <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--muted);align-self:center">Samples:</span>
+    <button class="sample-btn" onclick="loadSample('bad')">Poorly ordered</button>
+    <button class="sample-btn" onclick="loadSample('entity')">Game entity</button>
+    <button class="sample-btn" onclick="loadSample('node')">Linked node</button>
+    <button class="sample-btn" onclick="loadSample('particle')">Particle</button>
+</div>
+
+<div class="editor-label">Odin Struct Definition</div>
+<div class="editor-wrap">
+    <textarea id="codeInput" placeholder="// Paste one or more Odin struct definitions...
+
+Particle :: struct {
+alive:    bool,
+position: f64,
+color:    u8,
+mass:     f32,
+velocity: f64,
+}”></textarea>
+</div>
+
+<div class="options-row">
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_cacheline" checked>
+        <span class="opt-box">v</span>
+        Show cache lines
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_compare" checked>
+        <span class="opt-box">v</span>
+        Show optimal layout
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_table" checked>
+        <span class="opt-box">v</span>
+        Field offset table
+    </label>
+</div>
+
+<button class="btn-run" onclick="visualize()">Visualize Memory Layout</button>
+
+<div id="result"></div>
+
+</div>
+
+<div class="info-section">
+    <h2>How Memory Layout Works in Odin</h2>
+    <p>Odin follows standard C alignment rules. Each field is placed at an offset that is a multiple of its own alignment, which is typically equal to its size.</p>
+    <ul>
+        <li>bool / u8 / i8 -- 1 byte size, 1 byte alignment</li>
+        <li>u16 / i16 / f16 -- 2 byte size, 2 byte alignment</li>
+        <li>u32 / i32 / f32 / rune -- 4 byte size, 4 byte alignment</li>
+        <li>u64 / i64 / f64 / pointers -- 8 byte size, 8 byte alignment</li>
+        <li>string / any -- 16 bytes (pointer + length), 8 byte alignment</li>
+        <li>[N]T arrays -- N * sizeof(T) bytes, align of T</li>
+        <li>Struct total size is padded to its largest field alignment</li>
+        <li>#packed removes padding at the cost of potential misaligned reads</li>
+    </ul>
+</div>
+
+</div>
+
+<footer class="wrapper">
+    <p>Odin Tools -- Memory Layout Visualizer</p>
+</footer>
+
+<script>
+var FIELD_COLORS = ["--c0","--c1","--c2","--c3","--c4","--c5","--c6","--c7","--c8","--c9"];
+
+var SAMPLES = {
+    bad: "// Poorly ordered -- lots of padding waste\nParticle :: struct {\n    alive:    bool,\n    position: f64,\n    color:    u8,\n    mass:     f32,\n    tag:      bool,\n    velocity: f64,\n}",
+    entity: "// Game entity -- mixed field sizes\nEntity :: struct {\n    position: [3]f32,\n    health:   i32,\n    velocity: [3]f32,\n    active:   bool,\n    id:       u64,\n}",
+    node: "// Linked list node\nNode :: struct {\n    value: i32,\n    next:  ^Node,\n    prev:  ^Node,\n    tag:   u8,\n}",
+    particle: "// Minimal particle\nParticle :: struct {\n    x:     f32,\n    y:     f32,\n    vx:    f32,\n    vy:    f32,\n    life:  f32,\n    color: u32,\n}"
+};
+
+function loadSample(key) {
+    document.getElementById("codeInput").value = SAMPLES[key];
+}
+
+// ── Type tables ──────────────────────────────────────────
+var TYPE_SIZES = {
+    "bool":1,"byte":1,"u8":1,"i8":1,
+    "u16":2,"i16":2,"f16":2,
+    "u32":4,"i32":4,"f32":4,"rune":4,
+    "u64":8,"i64":8,"f64":8,"uint":8,"int":8,"uintptr":8,
+    "rawptr":8,"cstring":8,
+    "string":16,"any":16
+};
+
+var TYPE_ALIGN = {
+    "bool":1,"byte":1,"u8":1,"i8":1,
+    "u16":2,"i16":2,"f16":2,
+    "u32":4,"i32":4,"f32":4,"rune":4,
+    "u64":8,"i64":8,"f64":8,"uint":8,"int":8,"uintptr":8,
+    "rawptr":8,"cstring":8,
+    "string":8,"any":8
+};
+
+function getSize(t) {
+    t = t.trim();
+    var arr = t.match(/^\[(\d+)\](.+)$/);
+    if (arr) { return parseInt(arr[1],10) * getSize(arr[2].trim()); }
+    if (t.indexOf("[dynamic]")===0 || (t[0]==="[" && t[1]==="]")) { return 24; }
+    if (t[0]==="^") { return 8; }
+    return TYPE_SIZES[t] || 0;
+}
+
+function getAlign(t) {
+    t = t.trim();
+    var arr = t.match(/^\[(\d+)\](.+)$/);
+    if (arr) { return getAlign(arr[2].trim()); }
+    if (t.indexOf("[dynamic]")===0 || (t[0]==="[" && t[1]==="]")) { return 8; }
+    if (t[0]==="^") { return 8; }
+    return TYPE_ALIGN[t] || 1;
+}
+
+function alignUp(off, al) {
+    if (al <= 1) { return off; }
+    return Math.ceil(off / al) * al;
+}
+
+function parseStructs(src) {
+    var structs = [];
+    var re = /(\w+)\s*::\s*struct\s*\{([^}]*)\}/g;
+    var m;
+    while ((m = re.exec(src)) !== null) {
+        var name = m[1];
+        var body = m[2];
+        var fields = [];
+        var fr = /(\w+)\s*:\s*([^,\/\n\r]+)/g;
+        var fm;
+        while ((fm = fr.exec(body)) !== null) {
+            var fname = fm[1].trim();
+            var ftype = fm[2].trim().replace(/,.*$/,"").trim();
+            var sz = getSize(ftype);
+            var al = getAlign(ftype);
+            if (sz > 0) {
+                fields.push({ name: fname, type: ftype, size: sz, align: al });
+            }
+        }
+        if (fields.length > 0) {
+            structs.push({ name: name, fields: fields });
+        }
+    }
+    return structs;
+}
+
+function buildLayout(fields) {
+    var off = 0;
+    var maxAl = 1;
+    var result = [];
+    for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        var aligned = alignUp(off, f.align);
+        var pad = aligned - off;
+        result.push({ name: f.name, type: f.type, size: f.size, align: f.align, offset: aligned, padding: pad });
+        off = aligned + f.size;
+        if (f.align > maxAl) { maxAl = f.align; }
+    }
+    var rawEnd = off;
+    var totalEnd = alignUp(rawEnd, maxAl);
+    var trailingPad = totalEnd - rawEnd;
+    return { fields: result, total: totalEnd, raw: rawEnd, trailing: trailingPad, maxAlign: maxAl };
+}
+
+function optimalFields(fields) {
+    return fields.slice().sort(function(a, b) {
+        if (b.align !== a.align) { return b.align - a.align; }
+        return b.size - a.size;
+    });
+}
+
+// ── Byte map: array of { fieldIdx or -1 for pad } ────────
+function buildByteMap(layout) {
+    var map = new Array(layout.total).fill(-1);
+    for (var i = 0; i < layout.fields.length; i++) {
+        var f = layout.fields[i];
+        for (var b = f.offset; b < f.offset + f.size; b++) {
+            if (b < map.length) { map[b] = i; }
+        }
+    }
+    return map;
+}
+
+// ── Render byte diagram ───────────────────────────────────
+function renderDiagram(layout, byteMap, colorMap, showCL, prefix) {
+    var CACHE_LINE = 64;
+    var totalBytes = layout.total;
+    var BYTES_PER_ROW = Math.min(totalBytes, 64);
+    var rows = Math.ceil(totalBytes / BYTES_PER_ROW);
+    var html = "";
+
+    for (var row = 0; row < rows; row++) {
+        var startByte = row * BYTES_PER_ROW;
+        var endByte   = Math.min(startByte + BYTES_PER_ROW, totalBytes);
+
+        // ruler
+        html += "<div class=\"byte-ruler\">";
+        for (var rb = startByte; rb < endByte; rb++) {
+            var clMark = showCL && (rb % CACHE_LINE === 0) && rb > 0;
+            html += "<div class=\"ruler-cell" + (clMark ? " cl-mark" : "") + "\">" + rb + "</div>";
+        }
+        html += "</div>";
+
+        // bytes
+        html += "<div class=\"byte-grid\">";
+        for (var b = startByte; b < endByte; b++) {
+            var fi = byteMap[b];
+            var clBoundary = showCL && b > 0 && (b % CACHE_LINE === 0);
+            var cellClass = "byte-cell" + (fi === -1 ? " pad-cell" : "") + (clBoundary ? " cl-boundary" : "");
+            var bg = fi === -1 ? "background:var(--pad)" : "background:var(" + colorMap[fi] + ")";
+            var label = fi === -1 ? "pad" : (layout.fields[fi] ? layout.fields[fi].name.substring(0,3) : "");
+            var title = fi === -1 ? "padding" : (layout.fields[fi] ? layout.fields[fi].name + " +" + b : "");
+            html += "<div class=\"" + cellClass + "\" style=\"" + bg + "\" title=\"" + title + "\">" + label + "</div>";
+        }
+        html += "</div>";
+    }
+    return html;
+}
+
+// ── Field legend ──────────────────────────────────────────
+function renderLegend(fields, colorMap, hasPad) {
+    var html = "<div class=\"field-legend\">";
+    for (var i = 0; i < fields.length; i++) {
+        html += "<div class=\"legend-item\"><div class=\"legend-swatch\" style=\"background:var(" + colorMap[i] + ")\"></div>" + fields[i].name + " (" + fields[i].type + ")</div>";
+    }
+    if (hasPad) {
+        html += "<div class=\"legend-item\"><div class=\"legend-pad\"></div>padding</div>";
+    }
+    html += "</div>";
+    return html;
+}
+
+// ── Field table ───────────────────────────────────────────
+function renderTable(layout, colorMap) {
+    var html = "<table class=\"field-table\"><thead><tr><th>Field</th><th>Type</th><th>Size</th><th>Align</th><th>Offset</th><th>Padding before</th></tr></thead><tbody>";
+    for (var i = 0; i < layout.fields.length; i++) {
+        var f = layout.fields[i];
+        var color = colorMap[i];
+        html += "<tr><td><span class=\"td-swatch\" style=\"background:var(" + color + ")\"></span>" + f.name + "</td>" +
+            "<td>" + f.type + "</td>" +
+            "<td>" + f.size + " B</td>" +
+            "<td>" + f.align + " B</td>" +
+            "<td>+" + f.offset + "</td>" +
+            "<td class=\"td-pad\">" + (f.padding > 0 ? f.padding + " B wasted" : "-") + "</td></tr>";
+    }
+    if (layout.trailing > 0) {
+        html += "<tr><td class=\"td-pad\" colspan=\"5\">(trailing padding)</td><td class=\"td-pad\">" + layout.trailing + " B wasted</td></tr>";
+    }
+    html += "<tr><td colspan=\"5\" style=\"font-weight:500;color:#fff\">Total size</td><td style=\"font-family:var(--font-mono);color:var(--accent)\">" + layout.total + " bytes</td></tr>";
+    html += "</tbody></table>";
+    return html;
+}
+
+// ── Main ──────────────────────────────────────────────────
+function visualize() {
+    var src      = document.getElementById("codeInput").value;
+    var showCL   = document.getElementById("opt_cacheline").checked;
+    var showCmp  = document.getElementById("opt_compare").checked;
+    var showTbl  = document.getElementById("opt_table").checked;
+
+    if (!src.trim()) {
+        alert("Please paste an Odin struct definition.");
+        return;
+    }
+
+    var structs = parseStructs(src);
+    if (structs.length === 0) {
+        alert("No valid Odin struct found. Make sure it matches the pattern:\nMyStruct :: struct { ... }");
+        return;
+    }
+
+    var html = "<div class=\"divider\"></div>";
+
+    for (var si = 0; si < structs.length; si++) {
+        var st     = structs[si];
+        var layout = buildLayout(st.fields);
+        var optFld = optimalFields(st.fields);
+        var optLay = buildLayout(optFld);
+        var byteMap = buildByteMap(layout);
+
+        // Assign colors by original field index
+        var colorMap = [];
+        for (var ci = 0; ci < st.fields.length; ci++) {
+            colorMap.push(FIELD_COLORS[ci % FIELD_COLORS.length]);
+        }
+
+        // Padding totals
+        var totalPad = layout.trailing;
+        for (var pi = 0; pi < layout.fields.length; pi++) { totalPad += layout.fields[pi].padding; }
+        var savings = layout.total - optLay.total;
+
+        // Header for this struct
+        html += "<div style=\"font-family:var(--font-mono);font-size:.75rem;color:var(--accent);margin-bottom:12px;letter-spacing:.06em\">" + st.name + " :: struct</div>";
+
+        // Metrics
+        var clCount = Math.ceil(layout.total / 64);
+        html += "<div class=\"metrics-row\">" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Total size</span><span class=\"m-value\">" + layout.total + "</span><span class=\"m-sub\">bytes</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Padding</span><span class=\"m-value\">" + totalPad + "</span><span class=\"m-sub\">bytes wasted</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Fields</span><span class=\"m-value\">" + st.fields.length + "</span><span class=\"m-sub\">total</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Cache lines</span><span class=\"m-value\">" + clCount + "</span><span class=\"m-sub\">" + (clCount > 1 ? "splits possible" : "fits in one") + "</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Max align</span><span class=\"m-value\">" + layout.maxAlign + "</span><span class=\"m-sub\">bytes</span></div>" +
+        "</div>";
+
+        // Byte diagram
+        html += "<div class=\"diagram-wrap\">" +
+            "<div class=\"diagram-title\">Default Layout -- byte map (" + layout.total + " bytes total" + (showCL ? ", orange = cache line boundary" : "") + ")</div>" +
+            renderDiagram(layout, byteMap, colorMap, showCL, "d") +
+            "<div style=\"margin-top:8px\">" + renderLegend(st.fields, colorMap, totalPad > 0) + "</div>" +
+        "</div>";
+
+        // Field table
+        if (showTbl) {
+            html += "<div class=\"divider\"></div>" + renderTable(layout, colorMap);
+        }
+
+        // Comparison
+        if (showCmp && savings > 0) {
+            html += "<div class=\"divider\"></div>";
+
+            // Optimal byte map -- map colors by original field name
+            var nameToColor = {};
+            for (var ni = 0; ni < st.fields.length; ni++) {
+                nameToColor[st.fields[ni].name] = colorMap[ni];
+            }
+            var optColorMap = optFld.map(function(f) { return nameToColor[f.name]; });
+            var optByteMap  = buildByteMap(optLay);
+
+            var optPad = optLay.trailing;
+            for (var oi = 0; oi < optLay.fields.length; oi++) { optPad += optLay.fields[oi].padding; }
+
+            html += "<div class=\"compare-grid\">" +
+                // Default
+                "<div class=\"compare-panel\">" +
+                    "<div class=\"compare-label cl-default\">Default order</div>" +
+                    "<div class=\"compare-size\">" + layout.total + " B</div>" +
+                    "<div class=\"compare-sub\">" + totalPad + " bytes padding</div>" +
+                    "<div style=\"margin-top:10px\">" + renderDiagram(layout, byteMap, colorMap, false, "cmp1") + "</div>" +
+                "</div>" +
+                // Optimal
+                "<div class=\"compare-panel\">" +
+                    "<div class=\"compare-label cl-optimal\">Optimal order (largest-first)</div>" +
+                    "<div class=\"compare-size\">" + optLay.total + " B</div>" +
+                    "<div class=\"compare-sub\">" + optPad + " bytes padding</div>" +
+                    "<div style=\"margin-top:10px\">" + renderDiagram(optLay, optByteMap, optColorMap, false, "cmp2") + "</div>" +
+                    (savings > 0 ? "<div class=\"savings-badge\">Saves " + savings + " bytes (" + Math.round(savings/layout.total*100) + "% smaller)</div>" : "") +
+                    "<div style=\"margin-top:10px;font-family:var(--font-mono);font-size:.7rem;color:var(--muted)\">" +
+                        "Optimal field order:<br>" +
+                        optFld.map(function(f) { return "  " + f.name + ": " + f.type; }).join("<br>") +
+                    "</div>" +
+                "</div>" +
+            "</div>";
+        } else if (showCmp && savings === 0) {
+            html += "<div style=\"font-family:var(--font-mono);font-size:.76rem;color:var(--green);padding:10px 0\">-> Field order is already optimal. No padding can be eliminated by reordering.</div>";
+        }
+
+        if (si < structs.length - 1) { html += "<div class=\"divider\" style=\"margin:28px 0\"></div>"; }
+    }
+
+    var resultEl = document.getElementById("result");
+    resultEl.innerHTML = html;
+    resultEl.classList.add("visible");
+    resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+</script>
+
+</body>
+</html>
