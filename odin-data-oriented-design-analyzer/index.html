@@ -1,9 +1,1026 @@
-<html><head><meta charset='UTF-8'><title>odin data oriented design analyzer</title>
-<link rel='stylesheet' href='styles.css'></head>
-<body><div class='container'>
-<h1>odin data oriented design analyzer</h1>
-<textarea id='input' placeholder='Paste code or describe scenario'></textarea>
-<input id='value' placeholder='Optional metric'>
-<button onclick='run()'>Analyze</button>
-<div id='res' class='result'></div>
-</div><script src='script.js'></script></body></html>
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Odin Data-Oriented Design Analyzer – AoS vs SoA, Cache Line & Struct Analysis</title>
+<meta name="description" content="Analyze Odin code for data-oriented design patterns. Detect Array-of-Structs vs Struct-of-Arrays, identify cache inefficiencies, struct padding waste, and get DOD refactoring suggestions.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg:        #06080c;
+    --surface:   #0b0f18;
+    --surface-2: #10151f;
+    --border:    #1a2230;
+    --accent:    #f97316;
+    --accent-2:  #fb923c;
+    --accent-dim: rgba(249,115,22,.07);
+    --green:     #22c55e;
+    --green-dim: rgba(34,197,94,.08);
+    --yellow:    #fbbf24;
+    --yellow-dim: rgba(251,191,36,.07);
+    --red:       #ef4444;
+    --red-dim:   rgba(239,68,68,.07);
+    --text:      #cbd5e1;
+    --muted:     #475569;
+
+    --font-display: "Barlow", sans-serif;
+    --font-mono:    "Share Tech Mono", monospace;
+    --radius:    6px;
+    --radius-lg: 12px;
+    --transition: 200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,.07) 3px, rgba(0,0,0,.07) 4px);
+    pointer-events: none; z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .25;
+    pointer-events: none; z-index: 0;
+}
+
+.wrapper {
+    position: relative; z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 24px;
+    width: 100%;
+    flex: 1;
+}
+
+/* NAV */
+nav {
+    position: relative; z-index: 2;
+    padding: 18px 24px;
+    max-width: 860px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+nav a {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--transition);
+}
+
+nav a:hover { color: var(--accent); }
+nav a::before { content: "<-"; }
+
+/* HEADER */
+header {
+    padding: 36px 0 32px;
+    border-bottom: 1px solid var(--border);
+    animation: fadeUp .5s ease both;
+}
+
+.header-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(249,115,22,.2);
+    border-radius: 3px;
+    padding: 3px 10px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    font-size: clamp(1.3rem, 3.5vw, 2rem);
+    font-weight: 400;
+    color: #fff;
+    letter-spacing: -.01em;
+    line-height: 1.2;
+    margin-bottom: 10px;
+}
+
+header h1 .acc { color: var(--accent); }
+
+header p {
+    font-size: .9rem;
+    color: var(--muted);
+    font-style: italic;
+    max-width: 520px;
+    font-weight: 300;
+}
+
+/* TOOL CARD */
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin: 32px 0;
+    animation: fadeUp .5s .08s ease both;
+}
+
+/* TABS */
+.tab-row {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.tab-btn {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: none;
+    padding: 9px 14px;
+    cursor: pointer;
+    transition: color var(--transition), background var(--transition);
+    border-right: 1px solid var(--border);
+}
+
+.tab-btn:last-child { border-right: none; }
+.tab-btn.active { color: var(--accent); background: var(--accent-dim); }
+.tab-btn:hover:not(.active) { color: var(--text); }
+
+/* EDITOR */
+.editor-label {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.editor-label::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+}
+
+.editor-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.editor-wrap:focus-within {
+    border-color: rgba(249,115,22,.4);
+    box-shadow: 0 0 0 3px rgba(249,115,22,.08);
+}
+
+textarea {
+    display: block;
+    width: 100%;
+    min-height: 240px;
+    background: var(--surface-2);
+    border: none;
+    outline: none;
+    padding: 14px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    line-height: 1.65;
+    resize: vertical;
+    tab-size: 4;
+}
+
+textarea::placeholder { color: var(--muted); opacity: .5; }
+
+/* OPTIONS */
+.options-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.opt-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    transition: color var(--transition);
+    user-select: none;
+}
+
+.opt-toggle:hover { color: var(--text); }
+.opt-toggle input[type="checkbox"] { display: none; }
+
+.opt-box {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: transparent;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.opt-toggle input:checked + .opt-box {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* BUTTON */
+.btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.btn-run:hover {
+    background: var(--accent-2);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(249,115,22,.3);
+}
+
+.btn-run:active { transform: translateY(0); }
+
+/* SAMPLES */
+.samples-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.sample-btn {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .05em;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 11px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.sample-btn:hover { color: var(--accent); border-color: rgba(249,115,22,.3); }
+
+/* RESULTS */
+#result { margin-top: 24px; display: none; animation: fadeUp .35s ease both; }
+#result.visible { display: block; }
+
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* score bar */
+.dod-score-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.dod-score-num {
+    font-family: var(--font-mono);
+    font-size: 3.2rem;
+    line-height: 1;
+    color: #fff;
+    font-weight: 400;
+}
+
+.dod-score-num span { font-size: 1rem; color: var(--muted); }
+
+.dod-score-meta { flex: 1; }
+
+.dod-level {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 4px 12px;
+    margin-bottom: 6px;
+}
+
+.level-good   { color: var(--green);  background: var(--green-dim);  border: 1px solid rgba(34,197,94,.2); }
+.level-medium { color: var(--yellow); background: var(--yellow-dim); border: 1px solid rgba(251,191,36,.2); }
+.level-poor   { color: var(--red);    background: var(--red-dim);    border: 1px solid rgba(239,68,68,.2); }
+
+.dod-score-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.dod-score-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+
+.fill-good   { background: linear-gradient(90deg, #16a34a, var(--green)); }
+.fill-medium { background: linear-gradient(90deg, #b45309, var(--yellow)); }
+.fill-poor   { background: linear-gradient(90deg, #b91c1c, var(--red)); }
+
+/* finding cards */
+.findings-title {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+}
+
+.findings-list { display: flex; flex-direction: column; gap: 8px; }
+
+.finding-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.finding-card.sev-high   { border-left: 3px solid var(--red); }
+.finding-card.sev-medium { border-left: 3px solid var(--yellow); }
+.finding-card.sev-low    { border-left: 3px solid var(--green); }
+.finding-card.sev-info   { border-left: 3px solid var(--accent); }
+
+.finding-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px 8px;
+    flex-wrap: wrap;
+}
+
+.f-badge {
+    font-family: var(--font-mono);
+    font-size: .6rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+}
+
+.sev-high   .f-badge { background: var(--red-dim);    color: var(--red); }
+.sev-medium .f-badge { background: var(--yellow-dim); color: var(--yellow); }
+.sev-low    .f-badge { background: var(--green-dim);  color: var(--green); }
+.sev-info   .f-badge { background: var(--accent-dim); color: var(--accent); }
+
+.f-title { font-family: var(--font-mono); font-size: .82rem; color: var(--text); }
+
+.finding-body { padding: 0 14px 12px; }
+
+.f-desc { font-size: .845rem; color: var(--muted); font-weight: 300; font-style: italic; line-height: 1.55; margin-bottom: 8px; }
+
+.f-fix {
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    color: var(--green);
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.15);
+    border-radius: 3px;
+    padding: 8px 12px;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+/* metrics grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.metric-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.m-label { font-family: var(--font-mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.m-value { font-family: var(--font-mono); font-size: 1.4rem; color: #fff; line-height: 1.1; }
+.m-sub   { font-size: .7rem; color: var(--muted); font-style: italic; }
+
+/* all good */
+.all-good {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--green-dim);
+    border: 1px solid rgba(34,197,94,.2);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-family: var(--font-mono);
+    font-size: .82rem;
+    color: var(--green);
+}
+
+.all-good::before { content: "[OK]"; }
+
+/* INFO */
+.info-section {
+    padding: 36px 0;
+    border-top: 1px solid var(--border);
+    animation: fadeUp .5s .15s ease both;
+}
+
+.info-section h2 {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 14px;
+}
+
+.info-section p { font-size: .875rem; color: var(--muted); font-weight: 300; font-style: italic; margin-bottom: 10px; max-width: 580px; }
+
+.info-section ul { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+
+.info-section ul li {
+    display: flex;
+    gap: 10px;
+    font-size: .855rem;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .78rem;
+}
+
+.info-section ul li::before { content: "->"; color: var(--accent); flex-shrink: 0; }
+
+footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 24px;
+    max-width: 860px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+footer p { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 480px) {
+    .tool-card { padding: 18px; }
+    .dod-score-num { font-size: 2.4rem; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+</head>
+<body>
+
+<nav class="wrapper">
+    <a href="/odin-tools/">Odin Tools</a>
+</nav>
+
+<div class="wrapper">
+
+<header>
+    <div class="header-chip">DOD Analyzer</div>
+    <h1><span class="acc">Data-Oriented Design</span> Analyzer</h1>
+    <p>Paste Odin struct definitions or describe your data layout. The analyzer detects AoS vs SoA patterns, cache inefficiencies, struct padding waste, and generates DOD refactoring suggestions.</p>
+</header>
+
+<div class="tool-card">
+
+<!-- Mode tabs -->
+<div class="tab-row">
+    <button class="tab-btn active" data-mode="struct" onclick="setMode(this)">Struct Analysis</button>
+    <button class="tab-btn" data-mode="pattern" onclick="setMode(this)">Pattern Detection</button>
+    <button class="tab-btn" data-mode="describe" onclick="setMode(this)">Describe Scenario</button>
+</div>
+
+<!-- Samples -->
+<div class="samples-row">
+    <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--muted);align-self:center">Samples:</span>
+    <button class="sample-btn" onclick="loadSample('aos')">AoS Entity</button>
+    <button class="sample-btn" onclick="loadSample('mixed')">Mixed layout</button>
+    <button class="sample-btn" onclick="loadSample('padded')">Padded struct</button>
+    <button class="sample-btn" onclick="loadSample('good')">SoA pattern</button>
+</div>
+
+<div class="editor-label">Input</div>
+<div class="editor-wrap">
+    <textarea id="codeInput" placeholder="// Paste Odin struct definitions or code here...
+
+Entity :: struct {
+position: [3]f32,
+health:   i32,
+velocity: [3]f32,
+active:   bool,
+}”></textarea>
+</div>
+
+<!-- Options -->
+<div class="options-row">
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_cacheline" checked>
+        <span class="opt-box">v</span>
+        Cache line analysis
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_padding" checked>
+        <span class="opt-box">v</span>
+        Padding detection
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_soa" checked>
+        <span class="opt-box">v</span>
+        SoA suggestions
+    </label>
+    <label class="opt-toggle">
+        <input type="checkbox" id="opt_reorder" checked>
+        <span class="opt-box">v</span>
+        Field reorder suggestions
+    </label>
+</div>
+
+<button class="btn-run" onclick="analyze()">Analyze DOD Pattern</button>
+
+<div id="result"></div>
+
+
+</div>
+
+<div class="info-section">
+    <h2>What This Tool Analyzes</h2>
+    <p>The DOD Analyzer scans your Odin code for patterns that affect data layout efficiency and cache performance.</p>
+    <ul>
+        <li>Array-of-Structs (AoS) detected when iterating — candidate for SoA transformation</li>
+        <li>Struct fields that cause cache line splits during hot-path iteration</li>
+        <li>Padding bytes wasted between fields due to alignment rules</li>
+        <li>Mixed hot/cold data in the same struct — cold fields evict hot data from cache</li>
+        <li>Booleans and flags that could be packed into a bitset</li>
+        <li>Structs that exceed one cache line (64 bytes) with no obvious reason</li>
+    </ul>
+</div>
+
+</div>
+
+<footer class="wrapper">
+    <p>Odin Tools -- Data-Oriented Design Analyzer</p>
+</footer>
+
+<script>
+var currentMode = "struct";
+
+function setMode(btn) {
+    document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    currentMode = btn.dataset.mode;
+
+    var ta = document.getElementById("codeInput");
+    if (currentMode === "struct") {
+        ta.placeholder = "// Paste Odin struct definitions...\nEntity :: struct {\n    position: [3]f32,\n    health:   i32,\n}";
+    } else if (currentMode === "pattern") {
+        ta.placeholder = "// Paste Odin code with iteration patterns, dynamic arrays, slices...\nfor entity in entities {\n    entity.position.x += entity.velocity.x\n}";
+    } else {
+        ta.placeholder = "Describe your data scenario in plain English.\nExample: I have 10000 entities each with position, velocity, health and a flag. I iterate them every frame updating positions.";
+    }
+}
+
+var SAMPLES = {
+    aos: "// Array of Structs -- classic AoS pattern\nEntity :: struct {\n    position: [3]f32,  // 12 bytes\n    health:   i32,     // 4 bytes\n    velocity: [3]f32,  // 12 bytes\n    active:   bool,    // 1 byte\n    name_id:  u32,     // 4 bytes (rarely used)\n    // total: 33+ bytes with padding\n}\n\nentities: [dynamic]Entity\n\n// Hot loop -- only touches position and velocity\nfor ent in &entities {\n    ent.position.x += ent.velocity.x * dt\n    ent.position.y += ent.velocity.y * dt\n    ent.position.z += ent.velocity.z * dt\n}",
+
+    mixed: "// Mixed hot and cold data\nPlayer :: struct {\n    x:          f32,    // hot\n    y:          f32,    // hot\n    name:       string, // cold -- 16 bytes\n    score:      i64,    // warm\n    active:     bool,   // hot\n    created_at: i64,    // cold\n    vx:         f32,    // hot\n    vy:         f32,    // hot\n}",
+
+    padded: "// Poorly ordered struct with padding waste\nParticle :: struct {\n    alive:    bool,   // 1 byte\n    // 7 bytes padding here!\n    position: f64,    // 8 bytes\n    color:    u8,     // 1 byte\n    // 3 bytes padding\n    mass:     f32,    // 4 bytes\n    tag:      bool,   // 1 byte\n    // 7 bytes padding!\n    velocity: f64,    // 8 bytes\n}",
+
+    good: "// Good SoA pattern\nParticles :: struct {\n    x:      [dynamic]f32,\n    y:      [dynamic]f32,\n    vx:     [dynamic]f32,\n    vy:     [dynamic]f32,\n    health: [dynamic]i32,\n    active: [dynamic]bool,\n}\n\n// Hot loop -- cache friendly\nfor i in 0..<len(particles.x) {\n    particles.x[i] += particles.vx[i] * dt\n    particles.y[i] += particles.vy[i] * dt\n}"
+};
+
+function loadSample(key) {
+    document.getElementById("codeInput").value = SAMPLES[key];
+    currentMode = "struct";
+    document.querySelectorAll(".tab-btn").forEach(function(b, i) {
+        b.classList.toggle("active", i === 0);
+    });
+}
+
+// ---- Type size table (Odin) ----
+var TYPE_SIZES = {
+    "bool": 1, "byte": 1, "u8": 1, "i8": 1,
+    "u16": 2, "i16": 2,
+    "u32": 4, "i32": 4, "f32": 4, "rune": 4,
+    "u64": 8, "i64": 8, "f64": 8, "uint": 8, "int": 8, "uintptr": 8,
+    "f16": 2,
+    "string": 16, "any": 16, "rawptr": 8, "cstring": 8
+};
+
+var TYPE_ALIGN = {
+    "bool": 1, "byte": 1, "u8": 1, "i8": 1,
+    "u16": 2, "i16": 2, "f16": 2,
+    "u32": 4, "i32": 4, "f32": 4, "rune": 4,
+    "u64": 8, "i64": 8, "f64": 8, "uint": 8, "int": 8, "uintptr": 8,
+    "string": 8, "any": 8, "rawptr": 8, "cstring": 8
+};
+
+var CACHE_LINE = 64;
+
+function getTypeSize(typeStr) {
+    typeStr = typeStr.trim();
+    // [N]T array
+    var arrMatch = typeStr.match(/^\[(\d+)\](.+)$/);
+    if (arrMatch) {
+        var n = parseInt(arrMatch[1], 10);
+        var inner = getTypeSize(arrMatch[2].trim());
+        return inner * n;
+    }
+    // [dynamic]T or []T -- pointer+len+cap = 24 bytes
+    if (typeStr.indexOf("[dynamic]") === 0 || (typeStr[0] === "[" && typeStr[1] === "]")) {
+        return 24;
+    }
+    // ^T pointer
+    if (typeStr[0] === "^") { return 8; }
+    var base = TYPE_SIZES[typeStr];
+    if (base) { return base; }
+    return 0; // unknown
+}
+
+function getTypeAlign(typeStr) {
+    typeStr = typeStr.trim();
+    var arrMatch = typeStr.match(/^\[(\d+)\](.+)$/);
+    if (arrMatch) { return getTypeAlign(arrMatch[2].trim()); }
+    if (typeStr.indexOf("[dynamic]") === 0 || (typeStr[0] === "[" && typeStr[1] === "]")) { return 8; }
+    if (typeStr[0] === "^") { return 8; }
+    var base = TYPE_ALIGN[typeStr];
+    if (base) { return base; }
+    return 1;
+}
+
+function alignUp(offset, align) {
+    if (align <= 1) { return offset; }
+    return Math.ceil(offset / align) * align;
+}
+
+// Parse struct fields from Odin source
+function parseStructFields(src) {
+    var structs = [];
+    var structRe = /(\w+)\s*::\s*struct\s*\{([^}]*)\}/g;
+    var match;
+    while ((match = structRe.exec(src)) !== null) {
+        var name = match[1];
+        var body = match[2];
+        var fields = [];
+        var fieldRe = /(\w+)\s*:\s*([^,\/\n]+)/g;
+        var fm;
+        while ((fm = fieldRe.exec(body)) !== null) {
+            var fname = fm[1].trim();
+            var ftype = fm[2].trim().replace(/,.*/, "").trim();
+            var size  = getTypeSize(ftype);
+            var align = getTypeAlign(ftype);
+            if (size > 0) {
+                fields.push({ name: fname, type: ftype, size: size, align: align });
+            }
+        }
+        if (fields.length > 0) {
+            structs.push({ name: name, fields: fields });
+        }
+    }
+    return structs;
+}
+
+// Calculate layout with padding
+function calcLayout(fields) {
+    var offset = 0;
+    var maxAlign = 1;
+    var layout = [];
+    for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        var aligned = alignUp(offset, f.align);
+        var pad = aligned - offset;
+        layout.push({ name: f.name, type: f.type, size: f.size, align: f.align, offset: aligned, padding: pad });
+        offset = aligned + f.size;
+        if (f.align > maxAlign) { maxAlign = f.align; }
+    }
+    var totalRaw = offset;
+    var totalAligned = alignUp(offset, maxAlign);
+    var trailingPad = totalAligned - totalRaw;
+    return { fields: layout, totalSize: totalAligned, totalRaw: totalRaw, trailingPad: trailingPad, maxAlign: maxAlign };
+}
+
+// Optimal layout (sort largest to smallest)
+function optimalLayout(fields) {
+    var sorted = fields.slice().sort(function(a, b) { return b.align - a.align || b.size - a.size; });
+    return calcLayout(sorted);
+}
+
+// Detect patterns in free text / code
+function detectPatterns(src, findings) {
+    var lower = src.toLowerCase();
+
+    // AoS iteration
+    if (/for\s+\w+\s+in\s+&?\w+/.test(src) || /for\s+\w+,?\s*\w*\s+in\s+/.test(src)) {
+        if (/\w+\.\w+/.test(src)) {
+            findings.push({
+                sev: "high",
+                title: "AoS Iteration Pattern Detected",
+                desc: "You are iterating over an array of structs and accessing multiple fields. Each iteration loads the full struct into cache — including fields you may not need. This causes cache pollution on hot loops.",
+                fix: "Consider #soa transformation:\n  particles: #soa [dynamic]Particle\nOdin will automatically lay out fields in separate arrays.\nAccess with: particles.x[i], particles.y[i]"
+            });
+        }
+    }
+
+    // Dynamic array of struct
+    if (/\[dynamic\]\s*[A-Z]\w+/.test(src)) {
+        findings.push({
+            sev: "medium",
+            title: "Dynamic Array of Struct (AoS Pattern)",
+            desc: "A [dynamic]StructType stores all fields interleaved in memory. If your hot loop only reads a subset of fields, the rest waste cache bandwidth.",
+            fix: "If iterating frequently over a subset of fields, split into:\n  positions: [dynamic][3]f32\n  velocities: [dynamic][3]f32\nOr use Odin's built-in: data: #soa [dynamic]YourStruct"
+        });
+    }
+
+    // Hot/cold mixing
+    if (lower.indexOf("name") !== -1 && lower.indexOf("string") !== -1) {
+        findings.push({
+            sev: "medium",
+            title: "Potential Hot/Cold Data Mixing",
+            desc: "String fields (16 bytes: pointer + length) are often cold data. If they live in the same struct as hot fields (position, velocity), they evict hot data from L1 cache.",
+            fix: "Separate hot and cold data:\n  // Hot struct (fits in cache line)\n  EntityCore :: struct { x, y, vx, vy: f32 }\n  // Cold struct (accessed rarely)\n  EntityMeta :: struct { name: string, id: u64 }"
+        });
+    }
+
+    // Booleans
+    var boolCount = (src.match(/:\s*bool/g) || []).length;
+    if (boolCount >= 3) {
+        findings.push({
+            sev: "low",
+            title: boolCount + " Boolean Fields -- Consider Bit Flags",
+            desc: "Each bool in Odin is 1 byte but aligns to at least 1 byte and may cause padding. " + boolCount + " bools = " + boolCount + " bytes minimum. A bitset packs 8 flags into 1 byte.",
+            fix: "Replace multiple bools with a bitset:\n  Flags :: bit_set[Flag]\n  Flag  :: enum { Active, Visible, Colliding, Dead }\n  flags: Flags  // 1 byte for up to 8 flags"
+        });
+    }
+}
+
+// Score computation
+function computeScore(structs, findings) {
+    var base = 100;
+    var deductions = { high: 25, medium: 12, low: 5 };
+    for (var i = 0; i < findings.length; i++) {
+        base -= (deductions[findings[i].sev] || 0);
+    }
+    // bonus for SoA
+    for (var j = 0; j < structs.length; j++) {
+        var s = structs[j];
+        var hasDynArrayFields = false;
+        for (var k = 0; k < s.fields.length; k++) {
+            if (s.fields[k].type.indexOf("[dynamic]") === 0 || s.fields[k].type.indexOf("[]") === 0) {
+                hasDynArrayFields = true; break;
+            }
+        }
+        if (hasDynArrayFields) { base += 10; }
+    }
+    if (base < 0)   { base = 0; }
+    if (base > 100) { base = 100; }
+    return base;
+}
+
+// ---- Main ----
+function analyze() {
+    var src = document.getElementById("codeInput").value;
+    var optCacheline = document.getElementById("opt_cacheline").checked;
+    var optPadding   = document.getElementById("opt_padding").checked;
+    var optSoa       = document.getElementById("opt_soa").checked;
+    var optReorder   = document.getElementById("opt_reorder").checked;
+
+    if (!src.trim()) {
+        alert("Please paste some Odin code or describe your scenario.");
+        return;
+    }
+
+    var structs  = parseStructFields(src);
+    var findings = [];
+    var metricsHTML = "";
+
+    // Per-struct analysis
+    var structSections = "";
+    for (var s = 0; s < structs.length; s++) {
+        var st     = structs[s];
+        var layout = calcLayout(st.fields);
+        var opt    = optimalLayout(st.fields);
+        var wasted = layout.totalSize - opt.totalSize;
+
+        // Cache line check
+        if (optCacheline && layout.totalSize > CACHE_LINE) {
+            findings.push({
+                sev: "high",
+                title: st.name + " exceeds one cache line (" + layout.totalSize + " bytes > 64)",
+                desc: "Structs larger than 64 bytes cause cache line splits. Iterating an array of " + st.name + " means each access potentially loads 2 cache lines.",
+                fix: "Split " + st.name + " into hot and cold parts:\n  " + st.name + "Hot  :: struct { /* fields touched every frame */ }\n  " + st.name + "Cold :: struct { /* fields read rarely */ }"
+            });
+        }
+
+        // Padding check
+        if (optPadding) {
+            var totalPad = 0;
+            for (var fi = 0; fi < layout.fields.length; fi++) {
+                totalPad += layout.fields[fi].padding;
+            }
+            totalPad += layout.trailingPad;
+
+            if (totalPad > 4) {
+                findings.push({
+                    sev: "medium",
+                    title: st.name + " has " + totalPad + " bytes of padding waste",
+                    desc: "Field alignment rules insert " + totalPad + " bytes of unused padding. Reordering fields from largest to smallest alignment eliminates most padding.",
+                    fix: optReorder && wasted > 0
+                        ? "Optimal field order for " + st.name + " (saves " + wasted + " bytes):\n" +
+                          opt.fields.map(function(f) { return "    " + f.name + ": " + f.type; }).join("\n")
+                        : "Sort fields largest-to-smallest alignment: u64/f64 first, then u32/f32, then u16/i16, then u8/bool."
+                });
+            }
+        }
+
+        // SoA suggestion
+        if (optSoa) {
+            var hasHotFields = false;
+            for (var hf = 0; hf < st.fields.length; hf++) {
+                var t = st.fields[hf].type;
+                if (t === "f32" || t === "f64" || /^\[\d+\]f/.test(t)) { hasHotFields = true; break; }
+            }
+            if (hasHotFields && layout.totalSize > 16) {
+                findings.push({
+                    sev: "low",
+                    title: st.name + " -- #soa transformation candidate",
+                    desc: "If you iterate over arrays of " + st.name + " frequently, Odin's #soa directive automatically transforms it into a Struct-of-Arrays layout.",
+                    fix: "// One line change:\nentities: #soa [dynamic]" + st.name + "\n// Access still works the same:\nentities[i].position"
+                });
+            }
+        }
+    }
+
+    // Pattern detection
+    detectPatterns(src, findings);
+
+    // Describe mode
+    if (currentMode === "describe" || structs.length === 0) {
+        var lower = src.toLowerCase();
+        if (lower.indexOf("entit") !== -1 || lower.indexOf("game") !== -1) {
+            findings.push({
+                sev: "medium",
+                title: "Game Entity System -- DOD Recommendations",
+                desc: "For game entity systems with frequent iteration, data-oriented layout dramatically improves frame times. The key is separating data by access frequency.",
+                fix: "Recommended Odin entity layout:\n  World :: struct {\n    // Hot: accessed every frame\n    pos_x, pos_y:   [dynamic]f32,\n    vel_x, vel_y:   [dynamic]f32,\n    // Warm: accessed conditionally\n    health:         [dynamic]i32,\n    // Cold: rarely accessed\n    names:          [dynamic]string,\n  }"
+            });
+        }
+        if (lower.indexOf("10000") !== -1 || lower.indexOf("1000") !== -1 || lower.indexOf("many") !== -1) {
+            findings.push({
+                sev: "high",
+                title: "Large Entity Count -- Cache Layout Critical",
+                desc: "With thousands of entities, cache efficiency determines frame time. AoS with 64-byte structs = 640KB+ per 10K entities. Only 1K fits in L1 cache.",
+                fix: "With SoA, iterating 10K positions = 40KB (f32 x 10K).\nThis fits entirely in L2 cache, giving 4-10x iteration speedup.\nUse: entities: #soa [dynamic]Entity"
+            });
+        }
+    }
+
+    // Score
+    var score = computeScore(structs, findings);
+    var levelCls = score >= 70 ? "level-good" : score >= 40 ? "level-medium" : "level-poor";
+    var levelTxt = score >= 70 ? "DOD-Friendly" : score >= 40 ? "Needs Improvement" : "Poor Layout";
+    var fillCls  = score >= 70 ? "fill-good" : score >= 40 ? "fill-medium" : "fill-poor";
+
+    // Metrics
+    var totalBytes = 0;
+    var totalPadBytes = 0;
+    var structCount = structs.length;
+    for (var m = 0; m < structs.length; m++) {
+        var ml = calcLayout(structs[m].fields);
+        totalBytes += ml.totalSize;
+        for (var mf = 0; mf < ml.fields.length; mf++) { totalPadBytes += ml.fields[mf].padding; }
+        totalPadBytes += ml.trailingPad;
+    }
+
+    metricsHTML =
+        "<div class=\"metrics-grid\">" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Structs</span><span class=\"m-value\">" + structCount + "</span><span class=\"m-sub\">detected</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Total size</span><span class=\"m-value\">" + totalBytes + "</span><span class=\"m-sub\">bytes</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Padding</span><span class=\"m-value\">" + totalPadBytes + "</span><span class=\"m-sub\">bytes wasted</span></div>" +
+            "<div class=\"metric-card\"><span class=\"m-label\">Issues</span><span class=\"m-value\">" + findings.length + "</span><span class=\"m-sub\">detected</span></div>" +
+        "</div>";
+
+    // Sort: high -> medium -> low -> info
+    var order = { high: 0, medium: 1, low: 2, info: 3 };
+    findings.sort(function(a, b) { return (order[a.sev] || 3) - (order[b.sev] || 3); });
+
+    var findingsHTML = "";
+    if (findings.length === 0) {
+        findingsHTML = "<div class=\"all-good\"> No major DOD issues detected. Layout looks cache-friendly.</div>";
+    } else {
+        findingsHTML =
+            "<p class=\"findings-title\">Findings -- sorted by severity</p>" +
+            "<div class=\"findings-list\">" +
+            findings.map(function(f) {
+                return "<div class=\"finding-card sev-" + f.sev + "\">" +
+                    "<div class=\"finding-top\">" +
+                        "<span class=\"f-badge\">" + f.sev + "</span>" +
+                        "<span class=\"f-title\">" + f.title + "</span>" +
+                    "</div>" +
+                    "<div class=\"finding-body\">" +
+                        "<div class=\"f-desc\">" + f.desc + "</div>" +
+                        (f.fix ? "<pre class=\"f-fix\">" + f.fix + "</pre>" : "") +
+
+
+                "</div>" +
+            "</div>";
+        }).join("") +
+        "</div>";
+}
+
+var resultEl = document.getElementById("result");
+resultEl.innerHTML =
+    "<div class=\"divider\"></div>" +
+    "<div class=\"dod-score-row\">" +
+        "<span class=\"dod-score-num\">" + score + "<span>/100</span></span>" +
+        "<div class=\"dod-score-meta\">" +
+            "<div class=\"dod-level " + levelCls + "\">" + levelTxt + "</div>" +
+            "<div class=\"dod-score-bar\"><div class=\"dod-score-fill " + fillCls + "\" style=\"width:" + score + "%\"></div></div>" +
+        "</div>" +
+    "</div>" +
+    metricsHTML +
+    "<div class=\"divider\"></div>" +
+    findingsHTML;
+
+resultEl.classList.add("visible");
+resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+
+}
+</script>
+
+</body>
+</html>
